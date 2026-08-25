@@ -61,6 +61,24 @@ QJsonObject componentToJson(const Component& rComponent)
         textObject.insert(QStringLiteral("bold"), rComponent.textData.bBold);
         textObject.insert(QStringLiteral("align"), rComponent.textData.nAlign);
         componentObject.insert(QStringLiteral("text"), textObject);
+    } else if (rComponent.eType == E_COMPONENT_TYPE_TABLE) {
+        QJsonObject tableObject;
+        QJsonArray rowsArray;
+        for (const QStringList& rRow : rComponent.tableData.vecRows) {
+            QJsonArray rowArray;
+            for (const QString& rCell : rRow) {
+                rowArray.append(rCell);
+            }
+            rowsArray.append(rowArray);
+        }
+        tableObject.insert(QStringLiteral("rows"), rowsArray);
+        tableObject.insert(QStringLiteral("headerColor"), colorToString(rComponent.tableData.headerColor));
+        tableObject.insert(QStringLiteral("textColor"), colorToString(rComponent.tableData.textColor));
+        tableObject.insert(QStringLiteral("borderColor"), colorToString(rComponent.tableData.borderColor));
+        tableObject.insert(QStringLiteral("fontSize"), rComponent.tableData.nFontSize);
+        tableObject.insert(QStringLiteral("showHeader"), rComponent.tableData.bShowHeader);
+        tableObject.insert(QStringLiteral("alternateRow"), rComponent.tableData.bAlternateRow);
+        componentObject.insert(QStringLiteral("table"), tableObject);
     } else {
         QJsonObject shapeObject;
         shapeObject.insert(QStringLiteral("shapeType"), shapeTypeToString(rComponent.shapeData.eShapeType));
@@ -101,6 +119,27 @@ Component componentFromJson(const QJsonObject& rComponentObject)
     component.textData.color = colorFromString(textObject.value(QStringLiteral("color")).toString());
     component.textData.bBold = textObject.value(QStringLiteral("bold")).toBool(false);
     component.textData.nAlign = textObject.value(QStringLiteral("align")).toInt(Qt::AlignLeft);
+
+    const QJsonObject tableObject = rComponentObject.value(QStringLiteral("table")).toObject();
+    component.tableData.vecRows.clear();
+    const QJsonArray rowsArray = tableObject.value(QStringLiteral("rows")).toArray();
+    for (const QJsonValue& rRowValue : rowsArray) {
+        if (!rRowValue.isArray()) {
+            continue;
+        }
+        QStringList row;
+        const QJsonArray rowArray = rRowValue.toArray();
+        for (const QJsonValue& rCellValue : rowArray) {
+            row.append(rCellValue.toString());
+        }
+        component.tableData.vecRows.append(row);
+    }
+    component.tableData.headerColor = colorFromString(tableObject.value(QStringLiteral("headerColor")).toString());
+    component.tableData.textColor = colorFromString(tableObject.value(QStringLiteral("textColor")).toString());
+    component.tableData.borderColor = colorFromString(tableObject.value(QStringLiteral("borderColor")).toString());
+    component.tableData.nFontSize = tableObject.value(QStringLiteral("fontSize")).toInt(16);
+    component.tableData.bShowHeader = tableObject.value(QStringLiteral("showHeader")).toBool(true);
+    component.tableData.bAlternateRow = tableObject.value(QStringLiteral("alternateRow")).toBool(false);
 
     const QJsonObject shapeObject = rComponentObject.value(QStringLiteral("shape")).toObject();
     const QJsonValue shapeTypeValue = shapeObject.value(QStringLiteral("shapeType"));

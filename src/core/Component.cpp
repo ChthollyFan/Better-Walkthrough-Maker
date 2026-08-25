@@ -16,6 +16,8 @@ QString componentTypeToString(E_COMPONENT_TYPE eType)
         return QStringLiteral("text");
     case E_COMPONENT_TYPE_SHAPE:
         return QStringLiteral("shape");
+    case E_COMPONENT_TYPE_TABLE:
+        return QStringLiteral("table");
     default:
         return QStringLiteral("shape");
     }
@@ -28,6 +30,9 @@ E_COMPONENT_TYPE componentTypeFromString(const QString& strType)
     }
     if (strType == QStringLiteral("text")) {
         return E_COMPONENT_TYPE_TEXT;
+    }
+    if (strType == QStringLiteral("table")) {
+        return E_COMPONENT_TYPE_TABLE;
     }
     // 未知类型按形状处理，保证文件可打开
     return E_COMPONENT_TYPE_SHAPE;

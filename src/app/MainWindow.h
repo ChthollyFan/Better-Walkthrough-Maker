@@ -50,6 +50,7 @@ private slots:
     void onAddImageComponent();
     void onAddTextComponent();
     void onAddShapeComponent(int nIndex);
+    void onAddTableComponent();
     // 编辑
     void onDeleteSelected();
     void onSelectAllComponents();

@@ -6,6 +6,7 @@
 #include "editor/ComponentItem.h"
 
 #include <QCheckBox>
+#include <QClipboard>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QCursor>
@@ -13,6 +14,9 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGraphicsSceneMouseEvent>
+#include <QGuiApplication>
+#include <QHBoxLayout>
+#include <QHeaderView>
 #include <QIcon>
 #include <QLineEdit>
 #include <QPainter>
@@ -20,7 +24,9 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTableWidget>
 #include <QToolButton>
+#include <QVBoxLayout>
 #include <QtMath>
 
 #include "editor/CanvasScene.h"
@@ -118,6 +124,50 @@ void ComponentItem::paintContent(QPainter* pPainter)
         pPainter->setFont(font);
         pPainter->setPen(rText.color);
         pPainter->drawText(contentRect, rText.nAlign, rText.strContent);
+        return;
+    }
+
+    if (m_component.eType == E_COMPONENT_TYPE_TABLE) {
+        const TableData& rTable = m_component.tableData;
+        // 计算行列数
+        const int nRows = rTable.vecRows.size();
+        int nCols = 1;
+        for (const QStringList& rRow : rTable.vecRows) {
+            nCols = qMax(nCols, rRow.size());
+        }
+        if (nRows == 0) {
+            pPainter->setPen(QPen(rTable.borderColor, 1));
+            pPainter->setBrush(Qt::NoBrush);
+            pPainter->drawRect(contentRect);
+            return;
+        }
+        const qreal dCellWidth = contentRect.width() / nCols;
+        const qreal dCellHeight = contentRect.height() / nRows;
+        QFont font(QStringLiteral("Microsoft YaHei"));
+        font.setPixelSize(rTable.nFontSize);
+        pPainter->setFont(font);
+
+        for (int nRow = 0; nRow < nRows; ++nRow) {
+            const QStringList& rRowData = rTable.vecRows.at(nRow);
+            for (int nCol = 0; nCol < nCols; ++nCol) {
+                const QRectF cellRect(nCol * dCellWidth, nRow * dCellHeight, dCellWidth, dCellHeight);
+                // 背景：表头 / 斑马纹 / 白
+                QColor fillColor(Qt::white);
+                if (nRow == 0 && rTable.bShowHeader) {
+                    fillColor = rTable.headerColor;
+                } else if (rTable.bAlternateRow && (nRow % 2 == 0)) {
+                    fillColor = QColor(245, 245, 245);
+                }
+                pPainter->fillRect(cellRect, fillColor);
+                pPainter->setPen(QPen(rTable.borderColor, 1));
+                pPainter->drawRect(cellRect);
+                // 文本
+                pPainter->setPen(rTable.textColor);
+                const QString strCell = nCol < rRowData.size() ? rRowData.at(nCol) : QString();
+                pPainter->drawText(cellRect.adjusted(4, 0, -4, 0),
+                                   Qt::AlignLeft | Qt::AlignVCenter, strCell);
+            }
+        }
         return;
     }
 
@@ -418,10 +468,20 @@ void ComponentItem::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* pEvent)
 
 void ComponentItem::editContent()
 {
-    if (m_component.eType != E_COMPONENT_TYPE_TEXT) {
-        return;
+    switch (m_component.eType) {
+    case E_COMPONENT_TYPE_TEXT:
+        editTextContent();
+        break;
+    case E_COMPONENT_TYPE_TABLE:
+        editTableContent();
+        break;
+    default:
+        break;
     }
+}
 
+void ComponentItem::editTextContent()
+{
     emit editStarted();
 
     // 文本样式编辑对话框：内容 / 字号 / 颜色 / 加粗 / 对齐
@@ -489,6 +549,128 @@ void ComponentItem::editContent()
         m_component.textData.bBold = pBoldCheck->isChecked();
         m_component.textData.nAlign = pAlignCombo->currentData().toInt();
         m_component.textData.color = color;
+        prepareGeometryChange();
+        update();
+        emit geometryChanged();
+    }
+
+    emit editFinished();
+}
+
+void ComponentItem::editTableContent()
+{
+    emit editStarted();
+
+    QDialog dialog;
+    dialog.setWindowTitle(QStringLiteral("编辑表格"));
+    dialog.resize(560, 420);
+    auto* pDialogLayout = new QVBoxLayout(&dialog);
+
+    auto* pTable = new QTableWidget(&dialog);
+    // 填充现有数据
+    const TableData& rSource = m_component.tableData;
+    int nSourceRows = rSource.vecRows.size();
+    int nSourceCols = 1;
+    for (const QStringList& rRow : rSource.vecRows) {
+        nSourceCols = qMax(nSourceCols, rRow.size());
+    }
+    if (nSourceRows == 0) {
+        nSourceRows = 3;
+        nSourceCols = 4;
+    }
+    pTable->setRowCount(nSourceRows);
+    pTable->setColumnCount(nSourceCols);
+    for (int nRow = 0; nRow < nSourceRows; ++nRow) {
+        const QStringList rRowData = nRow < rSource.vecRows.size() ? rSource.vecRows.at(nRow) : QStringList();
+        for (int nCol = 0; nCol < nSourceCols; ++nCol) {
+            pTable->setItem(nRow, nCol, new QTableWidgetItem(nCol < rRowData.size()
+                ? rRowData.at(nCol) : QString()));
+        }
+    }
+    pTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    pDialogLayout->addWidget(pTable);
+
+    auto* pButtonRow = new QHBoxLayout;
+    QPushButton* pAddRowButton = new QPushButton(QStringLiteral("加行"), &dialog);
+    QPushButton* pAddColButton = new QPushButton(QStringLiteral("加列"), &dialog);
+    QPushButton* pDelRowButton = new QPushButton(QStringLiteral("删行"), &dialog);
+    QPushButton* pDelColButton = new QPushButton(QStringLiteral("删列"), &dialog);
+    QPushButton* pCsvButton = new QPushButton(QStringLiteral("从剪贴板导入 CSV"), &dialog);
+    connect(pAddRowButton, &QPushButton::clicked, &dialog, [pTable]() {
+        pTable->insertRow(pTable->rowCount());
+    });
+    connect(pAddColButton, &QPushButton::clicked, &dialog, [pTable]() {
+        pTable->insertColumn(pTable->columnCount());
+    });
+    connect(pDelRowButton, &QPushButton::clicked, &dialog, [pTable]() {
+        const int nRow = pTable->currentRow();
+        if (nRow >= 0) {
+            pTable->removeRow(nRow);
+        }
+    });
+    connect(pDelColButton, &QPushButton::clicked, &dialog, [pTable]() {
+        const int nCol = pTable->currentColumn();
+        if (nCol >= 0) {
+            pTable->removeColumn(nCol);
+        }
+    });
+    connect(pCsvButton, &QPushButton::clicked, &dialog, [pTable]() {
+        const QString strCsv = QGuiApplication::clipboard()->text();
+        // 按行解析，再按分隔符（优先制表符，其次逗号）拆列
+        const QStringList lines = strCsv.split(QLatin1Char('\n'));
+        QVector<QStringList> vecRows;
+        for (const QString& strLine : lines) {
+            const QString strTrimmed = strLine.trimmed();
+            if (strTrimmed.isEmpty()) {
+                continue;
+            }
+            const QChar splitChar = strTrimmed.contains(QLatin1Char('\t')) ? QLatin1Char('\t')
+                                                                           : QLatin1Char(',');
+            vecRows.append(strTrimmed.split(splitChar));
+        }
+        if (vecRows.isEmpty()) {
+            return;
+        }
+        int nMaxCols = 1;
+        for (const QStringList& rRow : vecRows) {
+            nMaxCols = qMax(nMaxCols, rRow.size());
+        }
+        pTable->setRowCount(vecRows.size());
+        pTable->setColumnCount(nMaxCols);
+        for (int nRow = 0; nRow < vecRows.size(); ++nRow) {
+            const QStringList& rRow = vecRows.at(nRow);
+            for (int nCol = 0; nCol < nMaxCols; ++nCol) {
+                pTable->setItem(nRow, nCol, new QTableWidgetItem(nCol < rRow.size()
+                    ? rRow.at(nCol) : QString()));
+            }
+        }
+    });
+    pButtonRow->addWidget(pAddRowButton);
+    pButtonRow->addWidget(pAddColButton);
+    pButtonRow->addWidget(pDelRowButton);
+    pButtonRow->addWidget(pDelColButton);
+    pButtonRow->addWidget(pCsvButton);
+    pDialogLayout->addLayout(pButtonRow);
+
+    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确定"));
+    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    pDialogLayout->addWidget(pButtons);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        TableData newData = m_component.tableData;   // 保留样式
+        newData.vecRows.clear();
+        for (int nRow = 0; nRow < pTable->rowCount(); ++nRow) {
+            QStringList row;
+            for (int nCol = 0; nCol < pTable->columnCount(); ++nCol) {
+                QTableWidgetItem* pItem = pTable->item(nRow, nCol);
+                row.append(pItem ? pItem->text() : QString());
+            }
+            newData.vecRows.append(row);
+        }
+        m_component.tableData = newData;
         prepareGeometryChange();
         update();
         emit geometryChanged();

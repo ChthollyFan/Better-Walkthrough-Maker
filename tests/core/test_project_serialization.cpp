@@ -198,6 +198,19 @@ void TestProjectSerialization::testComponentRoundtrip()
     shapeComponent.shapeData.nBorderWidth = 2;
     shapeComponent.bLocked = true;
 
+    Component tableComponent;
+    tableComponent.strId = QStringLiteral("id-table-1");
+    tableComponent.eType = E_COMPONENT_TYPE_TABLE;
+    tableComponent.pos = QPointF(100, 150);
+    tableComponent.size = QSizeF(400, 200);
+    tableComponent.tableData.vecRows = {
+        {QStringLiteral("装备"), QStringLiteral("攻击"), QStringLiteral("获取")},
+        {QStringLiteral("猎犬长牙"), QStringLiteral("145"), QStringLiteral("宁姆格福")},
+    };
+    tableComponent.tableData.nFontSize = 14;
+    tableComponent.tableData.bShowHeader = true;
+    tableComponent.tableData.headerColor = QColor(180, 200, 220);
+
     Project project;
     project.strName = QStringLiteral("组件测试");
     Walkthrough walkthrough;
@@ -205,7 +218,7 @@ void TestProjectSerialization::testComponentRoundtrip()
     Page page;
     page.strName = QStringLiteral("页面 1");
     page.size = QSize(1080, 1440);
-    page.vecComponents = {imageComponent, textComponent, shapeComponent};
+    page.vecComponents = {imageComponent, textComponent, shapeComponent, tableComponent};
     walkthrough.vecPages.append(page);
     project.vecWalkthroughs.append(walkthrough);
 
@@ -216,7 +229,7 @@ void TestProjectSerialization::testComponentRoundtrip()
     QVERIFY2(ProjectSerializer::fromJson(strJson, &parsed, &strErrorMessage), qPrintable(strErrorMessage));
 
     const auto& rComponents = parsed.vecWalkthroughs.at(0).vecPages.at(0).vecComponents;
-    QCOMPARE(rComponents.size(), 3);
+    QCOMPARE(rComponents.size(), 4);
 
     // 图片组件
     QCOMPARE(rComponents.at(0).strId, QStringLiteral("id-image-1"));
@@ -240,6 +253,16 @@ void TestProjectSerialization::testComponentRoundtrip()
     QCOMPARE(rComponents.at(2).shapeData.fillColor, QColor(240, 240, 240));
     QCOMPARE(rComponents.at(2).shapeData.nBorderWidth, 2);
     QVERIFY(rComponents.at(2).bLocked);
+
+    // 表格组件
+    QCOMPARE(rComponents.at(3).eType, E_COMPONENT_TYPE_TABLE);
+    QCOMPARE(rComponents.at(3).pos, QPointF(100, 150));
+    QCOMPARE(rComponents.at(3).size, QSizeF(400, 200));
+    QCOMPARE(rComponents.at(3).tableData.vecRows.size(), 2);
+    QCOMPARE(rComponents.at(3).tableData.vecRows.at(0).at(0), QStringLiteral("装备"));
+    QCOMPARE(rComponents.at(3).tableData.vecRows.at(1).at(1), QStringLiteral("145"));
+    QCOMPARE(rComponents.at(3).tableData.nFontSize, 14);
+    QCOMPARE(rComponents.at(3).tableData.headerColor, QColor(180, 200, 220));
 }
 
 void TestProjectSerialization::testLegacyFormatWithoutComponents()

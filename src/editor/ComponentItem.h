@@ -39,7 +39,7 @@ public:
     Component component() const { return m_component; }
     void setComponent(const Component& rComponent);
 
-    // 双击编辑（文本组件编辑内容）
+    // 双击编辑（文本/表格组件编辑内容）
     void editContent();
 
 signals:
@@ -66,6 +66,8 @@ private:
     void updateCursorByHandle(E_HANDLE_TYPE eHandle);
     void resizeByHandle(E_HANDLE_TYPE eHandle, const QPointF& rDelta);
     void updateRotateByMouse(const QPointF& rScenePos);
+    void editTextContent();
+    void editTableContent();
     qreal handleHitRadius() const;
 
     Component m_component;                    // 组件数据副本

@@ -10,6 +10,8 @@
 #include <QPointF>
 #include <QSizeF>
 #include <QString>
+#include <QStringList>
+#include <QVector>
 
 namespace bwm {
 
@@ -18,6 +20,7 @@ enum E_COMPONENT_TYPE {
     E_COMPONENT_TYPE_IMAGE = 0,   // 图片
     E_COMPONENT_TYPE_TEXT,        // 文本
     E_COMPONENT_TYPE_SHAPE,       // 形状
+    E_COMPONENT_TYPE_TABLE,       // 表格
 };
 
 // 形状子类型
@@ -52,6 +55,17 @@ struct ShapeData {
     int nBorderWidth = 1;                               // 描边宽度
 };
 
+// 表格组件数据：装备数值表、属性对比等。
+struct TableData {
+    QVector<QStringList> vecRows;        // 行数据（每行一个字符串列表）；第一行可作表头
+    QColor headerColor = QColor(200, 200, 200);   // 表头背景色
+    QColor textColor = QColor(Qt::black);        // 文本颜色
+    QColor borderColor = QColor(Qt::gray);       // 边框颜色
+    int nFontSize = 16;                           // 字号
+    bool bShowHeader = true;                      // 是否显示表头
+    bool bAlternateRow = false;                   // 斑马纹
+};
+
 // 组件：画布元素。数据与渲染分离——本结构仅存数据，渲染由 editor/ComponentItem 完成。
 struct Component {
     QString strId;                        // 唯一 id（QUuid 字符串）
@@ -66,6 +80,7 @@ struct Component {
     ImageData imageData;                  // 图片数据（eType 为 IMAGE 时有效）
     TextData textData;                    // 文本数据（eType 为 TEXT 时有效）
     ShapeData shapeData;                  // 形状数据（eType 为 SHAPE 时有效）
+    TableData tableData;                  // 表格数据（eType 为 TABLE 时有效）
 };
 
 // 组件类型与颜色的字符串转换（JSON 序列化用；字符串形式保证可读与迁移友好）
@@ -100,6 +115,17 @@ inline bool operator==(const ShapeData& rLeft, const ShapeData& rRight)
         && rLeft.nBorderWidth == rRight.nBorderWidth;
 }
 
+inline bool operator==(const TableData& rLeft, const TableData& rRight)
+{
+    return rLeft.vecRows == rRight.vecRows
+        && rLeft.headerColor == rRight.headerColor
+        && rLeft.textColor == rRight.textColor
+        && rLeft.borderColor == rRight.borderColor
+        && rLeft.nFontSize == rRight.nFontSize
+        && rLeft.bShowHeader == rRight.bShowHeader
+        && rLeft.bAlternateRow == rRight.bAlternateRow;
+}
+
 inline bool operator==(const Component& rLeft, const Component& rRight)
 {
     return rLeft.strId == rRight.strId
@@ -112,7 +138,8 @@ inline bool operator==(const Component& rLeft, const Component& rRight)
         && rLeft.bLocked == rRight.bLocked
         && rLeft.imageData == rRight.imageData
         && rLeft.textData == rRight.textData
-        && rLeft.shapeData == rRight.shapeData;
+        && rLeft.shapeData == rRight.shapeData
+        && rLeft.tableData == rRight.tableData;
 }
 
 inline bool operator!=(const Component& rLeft, const Component& rRight)

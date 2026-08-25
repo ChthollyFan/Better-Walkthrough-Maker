@@ -182,6 +182,9 @@ void MainWindow::createMenus()
     QAction* pAddTextAction = pInsertMenu->addAction(QStringLiteral("文本(&T)…"));
     connect(pAddTextAction, &QAction::triggered, this, &MainWindow::onAddTextComponent);
 
+    QAction* pAddTableAction = pInsertMenu->addAction(QStringLiteral("表格(&B)…"));
+    connect(pAddTableAction, &QAction::triggered, this, &MainWindow::onAddTableComponent);
+
     QMenu* pShapeMenu = pInsertMenu->addMenu(QStringLiteral("形状(&S)"));
     QAction* pAddRectAction = pShapeMenu->addAction(QStringLiteral("矩形"));
     pAddRectAction->setData(static_cast<int>(E_SHAPE_TYPE_RECTANGLE));
@@ -290,6 +293,9 @@ void MainWindow::createToolBar()
 
     QAction* pAddTextAction = m_pToolBar->addAction(QStringLiteral("插入文本"));
     connect(pAddTextAction, &QAction::triggered, this, &MainWindow::onAddTextComponent);
+
+    QAction* pAddTableAction = m_pToolBar->addAction(QStringLiteral("插入表格"));
+    connect(pAddTableAction, &QAction::triggered, this, &MainWindow::onAddTableComponent);
 
     auto* pShapeCombo = new QComboBox(m_pToolBar);
     pShapeCombo->addItem(QStringLiteral("矩形"), static_cast<int>(E_SHAPE_TYPE_RECTANGLE));
@@ -712,6 +718,24 @@ void MainWindow::onAddShapeComponent(int nIndex)
     }
 }
 
+void MainWindow::onAddTableComponent()
+{
+    Component component;
+    component.eType = E_COMPONENT_TYPE_TABLE;
+    component.size = QSizeF(420, 200);
+    component.tableData.vecRows = {
+        {QStringLiteral("装备"), QStringLiteral("攻击"), QStringLiteral("获取途径")},
+        {QStringLiteral("猎犬长牙"), QStringLiteral("145"), QStringLiteral("宁姆格福")},
+        {QStringLiteral("名刀月隐"), QStringLiteral("160"), QStringLiteral("湖区")},
+    };
+    ComponentItem* pNewItem = m_pScene->addComponent(component);
+    if (pNewItem) {
+        m_pScene->clearSelection();
+        pNewItem->setSelected(true);
+        m_pView->centerOn(pNewItem);
+    }
+}
+
 void MainWindow::onDeleteSelected()
 {
     m_pScene->removeSelectedComponents();
@@ -932,9 +956,12 @@ void MainWindow::onCanvasContextMenu(const QPointF& rScenePos)
     QAction* pEditTextAction = nullptr;
     QAction* pLockAction = nullptr;
     if (pHitItem) {
-        if (pHitItem->component().eType == E_COMPONENT_TYPE_TEXT) {
+        const E_COMPONENT_TYPE eType = pHitItem->component().eType;
+        if (eType == E_COMPONENT_TYPE_TEXT || eType == E_COMPONENT_TYPE_TABLE) {
             menu.addSeparator();
-            pEditTextAction = menu.addAction(QStringLiteral("编辑文本…"));
+            pEditTextAction = menu.addAction(eType == E_COMPONENT_TYPE_TEXT
+                                                 ? QStringLiteral("编辑文本…")
+                                                 : QStringLiteral("编辑表格…"));
         }
         menu.addSeparator();
         pLockAction = menu.addAction(pHitItem->component().bLocked
