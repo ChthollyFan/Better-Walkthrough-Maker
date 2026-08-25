@@ -2,22 +2,37 @@
 
 ## 项目结构与模块组织
 
-本仓库目前处于初始状态，仅包含：
+当前结构（M1 骨架已落地）：
 
-- `README.md` — 项目说明。
-- `.git/` — 版本历史。
+- `src/app/` — 入口与主窗口。
+- `src/core/` — 数据模型与 `project.json` 序列化。
+- `src/project/` — 项目管理（新建/打开/自动保存/崩溃恢复）。
+- `src/settings/` — 全局设置（QSettings）。
+- `tests/` — 单元测试（Qt Test），目录结构镜像 `src/`。
+- `docs/` — 项目规划等文档。
 
-目前尚无源码与测试。后续代码请遵循以下约定：
-
-- 源码放在 `src/`，按功能或模块组织。
-- 测试放在 `tests/`，目录结构镜像 `src/`。
-- 其他文档放在 `docs/`。
-
-当第一个真实模块加入后，请同步更新本节。
+约定：源码放在 `src/` 按功能模块组织；测试放在 `tests/` 镜像 `src/`；其他文档放在 `docs/`。核心库目标为 `bwm_core`（静态库），主程序与测试共用。
 
 ## 构建、测试与开发命令
 
-目前尚未配置构建系统、包清单或测试运行器，请勿假定 `npm`、`make`、`cmake` 等命令在此可用。引入工具后，在本节补充实际命令并各附一句说明（例如用 `cmake --preset windows-msvc-debug` 配置项目，用 `ctest` 运行测试）。
+本机开发环境：Windows + CMake + Ninja + MinGW-w64 g++ 14.2 + Qt 6.11.2（MinGW 版，位于 `C:\Users\ThinkPad\Qt\6.11.2\mingw_64`，由 aqtinstall 的 7z 包手动解压安装；`D:\software\Qt` 另有 MSVC 版 Qt 6.11.1，其 `Qt6_DIR` 环境变量会干扰 CMake 探测，配置时需覆盖）。
+
+```powershell
+# 配置（显式指定 MinGW 版 Qt，覆盖环境变量 Qt6_DIR 的干扰）
+cmake -S . -B build -G Ninja "-DCMAKE_PREFIX_PATH=C:/Users/ThinkPad/Qt/6.11.2/mingw_64" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++
+
+# 编译
+cmake --build build
+
+# 运行测试（Qt 与 MinGW 运行时 DLL 在 Qt 的 bin 目录）
+$env:PATH = "C:/Users/ThinkPad/Qt/6.11.2/mingw_64/bin;" + $env:PATH
+ctest --test-dir build --output-on-failure
+
+# 运行主程序
+build\src\bwm.exe
+```
+
+注意：本会话沙箱环境下，CMake 与编译命令需要全权限（其内部启动 g++ 并捕获输出，受沙箱管道限制会挂起）。
 
 ## 编码风格与命名规范
 

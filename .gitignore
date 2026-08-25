@@ -1,2 +1,5 @@
+# 构建产物
+build/
+
 # 环境生成物
 dsh-usage/
