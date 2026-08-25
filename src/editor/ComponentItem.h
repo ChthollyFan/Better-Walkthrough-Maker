@@ -45,6 +45,10 @@ public:
 signals:
     // 组件几何或内容变化后发出（场景据此通知主窗口同步模型）
     void geometryChanged();
+    // 一次编辑事务开始（按下开始移动/缩放/旋转时发出，供撤销命令记录快照）
+    void editStarted();
+    // 一次编辑事务结束（释放鼠标时发出，供撤销命令提交）
+    void editFinished();
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* pEvent) override;

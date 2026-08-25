@@ -76,6 +76,50 @@ E_SHAPE_TYPE shapeTypeFromString(const QString& strShapeType);
 QString colorToString(const QColor& rColor);
 QColor colorFromString(const QString& strColor);
 
+// 相等比较（快照撤销、脏检测等场景使用）
+inline bool operator==(const ImageData& rLeft, const ImageData& rRight)
+{
+    return rLeft.strAssetId == rRight.strAssetId && rLeft.strFilePath == rRight.strFilePath;
+}
+
+inline bool operator==(const TextData& rLeft, const TextData& rRight)
+{
+    return rLeft.strContent == rRight.strContent
+        && rLeft.strFontFamily == rRight.strFontFamily
+        && rLeft.nFontSize == rRight.nFontSize
+        && rLeft.color == rRight.color
+        && rLeft.bBold == rRight.bBold
+        && rLeft.nAlign == rRight.nAlign;
+}
+
+inline bool operator==(const ShapeData& rLeft, const ShapeData& rRight)
+{
+    return rLeft.eShapeType == rRight.eShapeType
+        && rLeft.fillColor == rRight.fillColor
+        && rLeft.borderColor == rRight.borderColor
+        && rLeft.nBorderWidth == rRight.nBorderWidth;
+}
+
+inline bool operator==(const Component& rLeft, const Component& rRight)
+{
+    return rLeft.strId == rRight.strId
+        && rLeft.eType == rRight.eType
+        && rLeft.pos == rRight.pos
+        && rLeft.size == rRight.size
+        && rLeft.dRotation == rRight.dRotation
+        && rLeft.nZOrder == rRight.nZOrder
+        && rLeft.bVisible == rRight.bVisible
+        && rLeft.bLocked == rRight.bLocked
+        && rLeft.imageData == rRight.imageData
+        && rLeft.textData == rRight.textData
+        && rLeft.shapeData == rRight.shapeData;
+}
+
+inline bool operator!=(const Component& rLeft, const Component& rRight)
+{
+    return !(rLeft == rRight);
+}
+
 } // namespace bwm
 
 #endif // BWM_CORE_COMPONENT_H

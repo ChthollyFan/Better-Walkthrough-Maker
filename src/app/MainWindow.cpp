@@ -15,6 +15,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
+#include <QCursor>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -34,8 +35,13 @@
 #include <QStatusBar>
 #include <QToolBar>
 #include <QTreeWidget>
+#include <QUndoStack>
+#include <QUuid>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <algorithm>
+#include <climits>
 
 namespace bwm {
 
@@ -58,6 +64,48 @@ QString componentDisplayName(const Component& rComponent)
     }
 }
 
+// 基于页面组件快照的撤销命令：undo/redo 时整体恢复组件列表并重建场景。
+class PageSnapshotCommand : public QUndoCommand {
+public:
+    PageSnapshotCommand(Page* pPage, const QVector<Component>& rBefore,
+                        const QVector<Component>& rAfter, const QString& strText,
+                        CanvasScene* pScene)
+        : QUndoCommand(strText)
+        , m_pPage(pPage)
+        , m_vecBefore(rBefore)
+        , m_vecAfter(rAfter)
+        , m_pScene(pScene)
+    {
+    }
+
+    void undo() override
+    {
+        apply(m_vecBefore);
+    }
+
+    void redo() override
+    {
+        apply(m_vecAfter);
+    }
+
+private:
+    void apply(const QVector<Component>& rComponents)
+    {
+        // 模型已是目标状态时无需重建（如 QUndoStack::push 时 redo 与现态一致）
+        if (m_pPage->vecComponents == rComponents) {
+            return;
+        }
+        m_pPage->vecComponents = rComponents;
+        m_pScene->loadPage(*m_pPage);
+        emit m_pScene->componentsChanged();   // 触发主窗口同步与图层刷新
+    }
+
+    Page* m_pPage;
+    QVector<Component> m_vecBefore;
+    QVector<Component> m_vecAfter;
+    CanvasScene* m_pScene;
+};
+
 } // namespace
 
 MainWindow::MainWindow(QWidget* pParent)
@@ -67,6 +115,8 @@ MainWindow::MainWindow(QWidget* pParent)
 {
     setWindowTitle(QStringLiteral("更好的攻略制作器"));
     resize(1400, 900);
+
+    m_pUndoStack = new QUndoStack(this);
 
     createMenus();
     createToolBar();
@@ -81,6 +131,12 @@ MainWindow::MainWindow(QWidget* pParent)
             this, &MainWindow::onCanvasComponentsChanged);
     connect(m_pScene, &QGraphicsScene::selectionChanged,
             this, &MainWindow::onCanvasSelectionChanged);
+    connect(m_pScene, &CanvasScene::componentEditStarted,
+            this, &MainWindow::onComponentEditStarted);
+    connect(m_pScene, &CanvasScene::componentEditFinished,
+            this, &MainWindow::onComponentEditFinished);
+    connect(m_pView, &CanvasView::contextMenuRequested,
+            this, &MainWindow::onCanvasContextMenu);
 }
 
 MainWindow::~MainWindow() = default;
@@ -151,6 +207,30 @@ void MainWindow::createMenus()
     // 编辑菜单
     QMenu* pEditMenu = menuBar()->addMenu(QStringLiteral("编辑(&E)"));
 
+    QAction* pUndoAction = m_pUndoStack->createUndoAction(this, QStringLiteral("撤销(&U)"));
+    pUndoAction->setShortcut(QKeySequence::Undo);
+    pEditMenu->addAction(pUndoAction);
+
+    QAction* pRedoAction = m_pUndoStack->createRedoAction(this, QStringLiteral("重做(&R)"));
+    pRedoAction->setShortcut(QKeySequence::Redo);
+    pEditMenu->addAction(pRedoAction);
+
+    pEditMenu->addSeparator();
+
+    QAction* pCutAction = pEditMenu->addAction(QStringLiteral("剪切(&T)"));
+    pCutAction->setShortcut(QKeySequence::Cut);
+    connect(pCutAction, &QAction::triggered, this, &MainWindow::onCut);
+
+    QAction* pCopyAction = pEditMenu->addAction(QStringLiteral("复制(&C)"));
+    pCopyAction->setShortcut(QKeySequence::Copy);
+    connect(pCopyAction, &QAction::triggered, this, &MainWindow::onCopy);
+
+    QAction* pPasteAction = pEditMenu->addAction(QStringLiteral("粘贴(&P)"));
+    pPasteAction->setShortcut(QKeySequence::Paste);
+    connect(pPasteAction, &QAction::triggered, this, &MainWindow::onPaste);
+
+    pEditMenu->addSeparator();
+
     QAction* pDeleteAction = pEditMenu->addAction(QStringLiteral("删除选中(&D)"));
     pDeleteAction->setShortcut(QKeySequence::Delete);
     connect(pDeleteAction, &QAction::triggered, this, &MainWindow::onDeleteSelected);
@@ -158,6 +238,47 @@ void MainWindow::createMenus()
     QAction* pSelectAllAction = pEditMenu->addAction(QStringLiteral("全选(&A)"));
     pSelectAllAction->setShortcut(QKeySequence::SelectAll);
     connect(pSelectAllAction, &QAction::triggered, this, &MainWindow::onSelectAllComponents);
+
+    pEditMenu->addSeparator();
+
+    // 对齐子菜单
+    QMenu* pAlignMenu = pEditMenu->addMenu(QStringLiteral("对齐(&G)"));
+    const QList<QPair<QString, int>> alignActions = {
+        {QStringLiteral("左对齐"), E_ALIGN_LEFT},
+        {QStringLiteral("水平居中"), E_ALIGN_H_CENTER},
+        {QStringLiteral("右对齐"), E_ALIGN_RIGHT},
+        {QStringLiteral("顶对齐"), E_ALIGN_TOP},
+        {QStringLiteral("垂直居中"), E_ALIGN_V_CENTER},
+        {QStringLiteral("底对齐"), E_ALIGN_BOTTOM},
+    };
+    for (const QPair<QString, int>& rAlign : alignActions) {
+        QAction* pAlignAction = pAlignMenu->addAction(rAlign.first);
+        const int nAlign = rAlign.second;
+        connect(pAlignAction, &QAction::triggered, this, [this, nAlign]() {
+            onAlignComponents(nAlign);
+        });
+    }
+    QAction* pDistributeHAction = pEditMenu->addAction(QStringLiteral("水平等距分布"));
+    connect(pDistributeHAction, &QAction::triggered, this, [this]() {
+        onDistributeComponents(true);
+    });
+    QAction* pDistributeVAction = pEditMenu->addAction(QStringLiteral("垂直等距分布"));
+    connect(pDistributeVAction, &QAction::triggered, this, [this]() {
+        onDistributeComponents(false);
+    });
+
+    pEditMenu->addSeparator();
+
+    // 吸附开关
+    QAction* pSnapGridAction = pEditMenu->addAction(QStringLiteral("网格吸附(&G)"));
+    pSnapGridAction->setCheckable(true);
+    pSnapGridAction->setChecked(m_pScene->snapToGrid());
+    connect(pSnapGridAction, &QAction::toggled, this, &MainWindow::onToggleSnapToGrid);
+
+    QAction* pSnapGuidesAction = pEditMenu->addAction(QStringLiteral("对齐参考线吸附(&L)"));
+    pSnapGuidesAction->setCheckable(true);
+    pSnapGuidesAction->setChecked(m_pScene->snapToGuides());
+    connect(pSnapGuidesAction, &QAction::toggled, this, &MainWindow::onToggleSnapToGuides);
 }
 
 void MainWindow::createToolBar()
@@ -180,6 +301,32 @@ void MainWindow::createToolBar()
     connect(pAddShapeAction, &QAction::triggered, this, [this, pShapeCombo]() {
         onAddShapeComponent(pShapeCombo->currentData().toInt());
     });
+
+    m_pToolBar->addSeparator();
+
+    QAction* pUndoAction = m_pUndoStack->createUndoAction(this, QStringLiteral("撤销"));
+    m_pToolBar->addAction(pUndoAction);
+    QAction* pRedoAction = m_pUndoStack->createRedoAction(this, QStringLiteral("重做"));
+    m_pToolBar->addAction(pRedoAction);
+
+    m_pToolBar->addSeparator();
+
+    // 对齐按钮（选中多个组件时有效）
+    const QList<QPair<QString, int>> alignToolbar = {
+        {QStringLiteral("左对齐"), E_ALIGN_LEFT},
+        {QStringLiteral("水平居中"), E_ALIGN_H_CENTER},
+        {QStringLiteral("右对齐"), E_ALIGN_RIGHT},
+        {QStringLiteral("顶对齐"), E_ALIGN_TOP},
+        {QStringLiteral("垂直居中"), E_ALIGN_V_CENTER},
+        {QStringLiteral("底对齐"), E_ALIGN_BOTTOM},
+    };
+    for (const QPair<QString, int>& rAlign : alignToolbar) {
+        QAction* pAlignAction = m_pToolBar->addAction(rAlign.first);
+        const int nAlign = rAlign.second;
+        connect(pAlignAction, &QAction::triggered, this, [this, nAlign]() {
+            onAlignComponents(nAlign);
+        });
+    }
 
     m_pToolBar->addSeparator();
     QAction* pDeleteAction = m_pToolBar->addAction(QStringLiteral("删除选中"));
@@ -575,6 +722,300 @@ void MainWindow::onSelectAllComponents()
     for (ComponentItem* pItem : m_pScene->componentItems()) {
         pItem->setSelected(true);
     }
+}
+
+QVector<Component> MainWindow::currentComponents()
+{
+    Page* pPage = currentPage();
+    return pPage ? pPage->vecComponents : QVector<Component>();
+}
+
+void MainWindow::pushSnapshot(const QString& strText, const QVector<Component>& rBefore,
+                              const QVector<Component>& rAfter)
+{
+    if (rBefore == rAfter) {
+        return;
+    }
+    Page* pPage = currentPage();
+    if (!pPage) {
+        return;
+    }
+    m_pUndoStack->push(new PageSnapshotCommand(pPage, rBefore, rAfter, strText, m_pScene));
+}
+
+void MainWindow::onComponentEditStarted()
+{
+    if (m_bInEditTransaction) {
+        return;
+    }
+    m_bInEditTransaction = true;
+    m_editBeforeSnapshot = currentComponents();
+}
+
+void MainWindow::onComponentEditFinished()
+{
+    if (!m_bInEditTransaction) {
+        return;
+    }
+    m_bInEditTransaction = false;
+    // 编辑期间 geometryChanged 已把模型同步为最新状态
+    pushSnapshot(QStringLiteral("移动/缩放组件"), m_editBeforeSnapshot, currentComponents());
+}
+
+void MainWindow::onCopy()
+{
+    m_vecClipboard.clear();
+    const QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
+    for (const ComponentItem* pItem : vecSelected) {
+        m_vecClipboard.append(pItem->component());
+    }
+    statusBar()->showMessage(QStringLiteral("已复制 %1 个组件").arg(m_vecClipboard.size()), 2000);
+}
+
+void MainWindow::onPaste()
+{
+    if (m_vecClipboard.isEmpty()) {
+        return;
+    }
+    Page* pPage = currentPage();
+    if (!pPage) {
+        return;
+    }
+    const QVector<Component> vecBefore = pPage->vecComponents;
+    const int nOffset = 20;
+    for (const Component& rComponent : m_vecClipboard) {
+        Component component = rComponent;
+        component.strId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        component.pos += QPointF(nOffset, nOffset);
+        component.nZOrder = 0;   // addComponent 自动分配新 zOrder
+        m_pScene->addComponent(component);
+    }
+    // addComponent 已触发同步，模型为粘贴后状态
+    pushSnapshot(QStringLiteral("粘贴组件"), vecBefore, currentComponents());
+}
+
+void MainWindow::onCut()
+{
+    if (m_pScene->selectedComponentItems().isEmpty()) {
+        return;
+    }
+    onCopy();
+    onDeleteSelected();
+}
+
+void MainWindow::onAlignComponents(int nAlign)
+{
+    QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
+    if (vecSelected.size() < 2) {
+        statusBar()->showMessage(QStringLiteral("请先选中至少两个组件"), 2000);
+        return;
+    }
+
+    // 计算选中组件的包围盒
+    QRectF boundingBox;
+    bool bFirst = true;
+    for (const ComponentItem* pItem : vecSelected) {
+        const QRectF itemRect(pItem->component().pos, pItem->component().size);
+        if (bFirst) {
+            boundingBox = itemRect;
+            bFirst = false;
+        } else {
+            boundingBox = boundingBox.united(itemRect);
+        }
+    }
+
+    const QVector<Component> vecBefore = currentComponents();
+    for (ComponentItem* pItem : vecSelected) {
+        Component component = pItem->component();
+        const qreal dWidth = component.size.width();
+        const qreal dHeight = component.size.height();
+        switch (nAlign) {
+        case E_ALIGN_LEFT:
+            component.pos.setX(boundingBox.left());
+            break;
+        case E_ALIGN_H_CENTER:
+            component.pos.setX(boundingBox.center().x() - dWidth / 2);
+            break;
+        case E_ALIGN_RIGHT:
+            component.pos.setX(boundingBox.right() - dWidth);
+            break;
+        case E_ALIGN_TOP:
+            component.pos.setY(boundingBox.top());
+            break;
+        case E_ALIGN_V_CENTER:
+            component.pos.setY(boundingBox.center().y() - dHeight / 2);
+            break;
+        case E_ALIGN_BOTTOM:
+            component.pos.setY(boundingBox.bottom() - dHeight);
+            break;
+        default:
+            break;
+        }
+        pItem->setComponent(component);
+    }
+    pushSnapshot(QStringLiteral("对齐组件"), vecBefore, currentComponents());
+}
+
+void MainWindow::onDistributeComponents(bool bHorizontal)
+{
+    QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
+    if (vecSelected.size() < 3) {
+        statusBar()->showMessage(QStringLiteral("请先选中至少三个组件"), 2000);
+        return;
+    }
+    // 按主轴坐标排序
+    std::sort(vecSelected.begin(), vecSelected.end(),
+              [bHorizontal](const ComponentItem* pLeft, const ComponentItem* pRight) {
+                  const qreal dLeftValue = bHorizontal ? pLeft->component().pos.x()
+                                                       : pLeft->component().pos.y();
+                  const qreal dRightValue = bHorizontal ? pRight->component().pos.x()
+                                                        : pRight->component().pos.y();
+                  return dLeftValue < dRightValue;
+              });
+
+    // 计算主轴总长（首组件起点 → 末组件终点）
+    const qreal dStart = bHorizontal ? vecSelected.first()->component().pos.x()
+                                     : vecSelected.first()->component().pos.y();
+    const qreal dEnd = bHorizontal
+        ? vecSelected.last()->component().pos.x() + vecSelected.last()->component().size.width()
+        : vecSelected.last()->component().pos.y() + vecSelected.last()->component().size.height();
+    qreal dTotalSize = 0;
+    for (const ComponentItem* pItem : vecSelected) {
+        dTotalSize += bHorizontal ? pItem->component().size.width()
+                                  : pItem->component().size.height();
+    }
+    const qreal dGap = (dEnd - dStart - dTotalSize) / (vecSelected.size() - 1);
+
+    const QVector<Component> vecBefore = currentComponents();
+    qreal dCursor = dStart;
+    for (ComponentItem* pItem : vecSelected) {
+        Component component = pItem->component();
+        if (bHorizontal) {
+            component.pos.setX(dCursor);
+        } else {
+            component.pos.setY(dCursor);
+        }
+        pItem->setComponent(component);
+        dCursor += (bHorizontal ? component.size.width() : component.size.height()) + dGap;
+    }
+    pushSnapshot(QStringLiteral("等距分布"), vecBefore, currentComponents());
+}
+
+void MainWindow::onCanvasContextMenu(const QPointF& rScenePos)
+{
+    ComponentItem* pHitItem = componentItemAt(rScenePos);
+    // 命中未选中的组件时先选中它
+    if (pHitItem && !pHitItem->isSelected()) {
+        m_pScene->clearSelection();
+        pHitItem->setSelected(true);
+    }
+
+    QMenu menu(this);
+    const bool bHasSelection = !m_pScene->selectedComponentItems().isEmpty();
+
+    QAction* pCutAction = menu.addAction(QStringLiteral("剪切"));
+    pCutAction->setEnabled(bHasSelection);
+    QAction* pCopyAction = menu.addAction(QStringLiteral("复制"));
+    pCopyAction->setEnabled(bHasSelection);
+    QAction* pPasteAction = menu.addAction(QStringLiteral("粘贴"));
+    pPasteAction->setEnabled(!m_vecClipboard.isEmpty());
+    menu.addSeparator();
+
+    QAction* pDeleteAction = menu.addAction(QStringLiteral("删除"));
+    pDeleteAction->setEnabled(bHasSelection);
+
+    QAction* pToTopAction = menu.addAction(QStringLiteral("置顶"));
+    pToTopAction->setEnabled(bHasSelection);
+    QAction* pToBottomAction = menu.addAction(QStringLiteral("置底"));
+    pToBottomAction->setEnabled(bHasSelection);
+
+    QAction* pEditTextAction = nullptr;
+    QAction* pLockAction = nullptr;
+    if (pHitItem) {
+        if (pHitItem->component().eType == E_COMPONENT_TYPE_TEXT) {
+            menu.addSeparator();
+            pEditTextAction = menu.addAction(QStringLiteral("编辑文本…"));
+        }
+        menu.addSeparator();
+        pLockAction = menu.addAction(pHitItem->component().bLocked
+                                         ? QStringLiteral("解除锁定")
+                                         : QStringLiteral("锁定"));
+    }
+
+    QAction* pChosen = menu.exec(QCursor::pos());
+    if (!pChosen) {
+        return;
+    }
+    if (pChosen == pCutAction) {
+        onCut();
+    } else if (pChosen == pCopyAction) {
+        onCopy();
+    } else if (pChosen == pPasteAction) {
+        onPaste();
+    } else if (pChosen == pDeleteAction) {
+        onDeleteSelected();
+    } else if (pChosen == pToTopAction) {
+        const QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
+        for (ComponentItem* pItem : vecSelected) {
+            setItemToTop(pItem, true);
+        }
+        syncCanvasToModel();
+    } else if (pChosen == pToBottomAction) {
+        const QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
+        for (ComponentItem* pItem : vecSelected) {
+            setItemToTop(pItem, false);
+        }
+        syncCanvasToModel();
+    } else if (pChosen == pEditTextAction && pHitItem) {
+        pHitItem->editContent();
+    } else if (pChosen == pLockAction && pHitItem) {
+        Component component = pHitItem->component();
+        component.bLocked = !component.bLocked;
+        pHitItem->setComponent(component);
+        syncCanvasToModel();
+    }
+}
+
+void MainWindow::onToggleSnapToGrid(bool bEnable)
+{
+    m_pScene->setSnapToGrid(bEnable);
+    m_pView->viewport()->update();
+}
+
+void MainWindow::onToggleSnapToGuides(bool bEnable)
+{
+    m_pScene->setSnapToGuides(bEnable);
+}
+
+void MainWindow::setItemToTop(ComponentItem* pItem, bool bTop)
+{
+    int nTargetZ = bTop ? 0 : INT_MAX;
+    for (const ComponentItem* pOther : m_pScene->componentItems()) {
+        if (pOther == pItem) {
+            continue;
+        }
+        if (bTop) {
+            nTargetZ = qMax(nTargetZ, pOther->component().nZOrder);
+        } else {
+            nTargetZ = qMin(nTargetZ, pOther->component().nZOrder);
+        }
+    }
+    Component component = pItem->component();
+    component.nZOrder = bTop ? nTargetZ + 1 : nTargetZ - 1;
+    pItem->setComponent(component);
+    m_pScene->sortByZOrder();
+}
+
+ComponentItem* MainWindow::componentItemAt(const QPointF& rScenePos) const
+{
+    for (const ComponentItem* pItem : m_pScene->componentItems()) {
+        // 命中检测用组件的矩形范围（不考虑旋转手柄）
+        const QRectF itemRect(pItem->component().pos, pItem->component().size);
+        if (itemRect.contains(rScenePos)) {
+            return const_cast<ComponentItem*>(pItem);
+        }
+    }
+    return nullptr;
 }
 
 void MainWindow::moveLayer(int nOffset)

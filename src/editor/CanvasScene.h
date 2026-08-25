@@ -36,14 +36,34 @@ public:
     // 按 zOrder 重排图元并刷新场景 Z 值（图层交换后调用）
     void sortByZOrder();
 
+    // 网格吸附设置
+    void setSnapToGrid(bool bEnable);
+    bool snapToGrid() const { return m_bSnapToGrid; }
+    void setGridSize(int nSize);
+    int gridSize() const { return m_nGridSize; }
+    // 对齐吸附设置（移动时吸附到其他组件边缘/中心）
+    void setSnapToGuides(bool bEnable);
+    bool snapToGuides() const { return m_bSnapToGuides; }
+
+    // 将坐标吸附到网格（网格吸附开启时生效）
+    QPointF snapPoint(const QPointF& rPoint) const;
+    // 将组件矩形吸附到网格与其他组件边缘/中心，返回修正后的位置
+    QPointF snapRect(const QPointF& rTopLeft, const QSizeF& rSize, ComponentItem* pSelf) const;
+
 signals:
     // 组件增删或几何/内容变化后发出（供主窗口同步模型与脏标记）
     void componentsChanged();
+    // 一次编辑事务开始/结束（转发自组件图元，供主窗口记录撤销快照）
+    void componentEditStarted();
+    void componentEditFinished();
 
 private:
     void rebuildItems(const QVector<Component>& rComponents);
 
     QVector<ComponentItem*> m_vecItems;   // 全部组件图元（按 zOrder 排序）
+    bool m_bSnapToGrid = true;            // 网格吸附开关
+    bool m_bSnapToGuides = true;          // 对齐参考线吸附开关
+    int m_nGridSize = 10;                 // 网格间距（逻辑像素）
 };
 
 } // namespace bwm

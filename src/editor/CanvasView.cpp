@@ -5,8 +5,12 @@
  */
 #include "editor/CanvasView.h"
 
+#include <QContextMenuEvent>
+#include <QPainter>
 #include <QScrollBar>
 #include <QWheelEvent>
+
+#include "editor/CanvasScene.h"
 
 namespace bwm {
 
@@ -48,6 +52,36 @@ void CanvasView::wheelEvent(QWheelEvent* pEvent)
         return;
     }
     QGraphicsView::wheelEvent(pEvent);
+}
+
+void CanvasView::drawBackground(QPainter* pPainter, const QRectF& rRect)
+{
+    QGraphicsView::drawBackground(pPainter, rRect);
+
+    // 网格绘制：仅当场景开启网格吸附且缩放足够大时显示，避免网格过密
+    const auto* pCanvasScene = qobject_cast<const CanvasScene*>(scene());
+    if (!pCanvasScene || !pCanvasScene->snapToGrid()) {
+        return;
+    }
+    if (transform().m11() < 0.5) {
+        return;
+    }
+    const int nGridSize = pCanvasScene->gridSize();
+    pPainter->setPen(QPen(QColor(200, 200, 200, 80), 0));
+    const qreal dLeft = std::floor(rRect.left() / nGridSize) * nGridSize;
+    const qreal dTop = std::floor(rRect.top() / nGridSize) * nGridSize;
+    for (qreal dX = dLeft; dX < rRect.right(); dX += nGridSize) {
+        pPainter->drawLine(QPointF(dX, rRect.top()), QPointF(dX, rRect.bottom()));
+    }
+    for (qreal dY = dTop; dY < rRect.bottom(); dY += nGridSize) {
+        pPainter->drawLine(QPointF(rRect.left(), dY), QPointF(rRect.right(), dY));
+    }
+}
+
+void CanvasView::contextMenuEvent(QContextMenuEvent* pEvent)
+{
+    emit contextMenuRequested(mapToScene(pEvent->pos()));
+    // 不调用基类：菜单由主窗口统一弹出
 }
 
 } // namespace bwm

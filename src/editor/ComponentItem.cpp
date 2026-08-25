@@ -12,6 +12,8 @@
 #include <QPainterPath>
 #include <QtMath>
 
+#include "editor/CanvasScene.h"
+
 namespace bwm {
 
 namespace {
@@ -278,7 +280,10 @@ void ComponentItem::resizeByHandle(E_HANDLE_TYPE eHandle, const QPointF& rDelta)
 
     m_component.pos = newPos;
     m_component.size = newSize;
-    setPos(newPos);
+    if (auto* pScene = qobject_cast<CanvasScene*>(scene())) {
+        m_component.pos = pScene->snapRect(m_component.pos, m_component.size, this);
+    }
+    setPos(m_component.pos);
     prepareGeometryChange();
     update();
     emit geometryChanged();
@@ -297,11 +302,16 @@ void ComponentItem::updateRotateByMouse(const QPointF& rScenePos)
 
 void ComponentItem::mousePressEvent(QGraphicsSceneMouseEvent* pEvent)
 {
+    if (m_component.bLocked) {
+        pEvent->ignore();
+        return;
+    }
     const QPointF localPos = pEvent->pos();
     m_eActiveHandle = hitTestHandle(localPos);
     m_pressPos = m_component.pos;
     m_pressSize = m_component.size;
     m_pressMouseScene = pEvent->scenePos();
+    emit editStarted();
 
     if (m_eActiveHandle == E_HANDLE_ROTATE) {
         const QPointF centerScene = mapToScene(QPointF(m_component.size.width() / 2, m_component.size.height() / 2));
@@ -330,8 +340,12 @@ void ComponentItem::mouseMoveEvent(QGraphicsSceneMouseEvent* pEvent)
     }
     if (m_eActiveHandle == E_HANDLE_NONE) {
         // 移动
-        m_component.pos = m_pressPos + delta;
-        setPos(m_component.pos);
+        QPointF newPos = m_pressPos + delta;
+        if (auto* pScene = qobject_cast<CanvasScene*>(scene())) {
+            newPos = pScene->snapRect(newPos, m_component.size, this);
+        }
+        m_component.pos = newPos;
+        setPos(newPos);
         update();
         emit geometryChanged();
         return;
@@ -344,6 +358,7 @@ void ComponentItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* pEvent)
 {
     m_eActiveHandle = E_HANDLE_NONE;
     setCursor(Qt::ArrowCursor);
+    emit editFinished();
     QGraphicsObject::mouseReleaseEvent(pEvent);
 }
 
