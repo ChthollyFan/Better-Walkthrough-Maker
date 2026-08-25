@@ -9,11 +9,14 @@
 #include "editor/CanvasScene.h"
 #include "editor/CanvasView.h"
 #include "editor/ComponentItem.h"
+#include "export/ExportRenderer.h"
 #include "project/ProjectManager.h"
 #include "settings/Settings.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QCursor>
 #include <QDialog>
@@ -25,6 +28,7 @@
 #include <QFormLayout>
 #include <QGraphicsScene>
 #include <QGraphicsView>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QImage>
@@ -37,7 +41,10 @@
 #include <QMessageBox>
 #include <QPair>
 #include <QPixmap>
+#include <QProgressDialog>
 #include <QPushButton>
+#include <QRadioButton>
+#include <QRegularExpression>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -175,6 +182,10 @@ void MainWindow::createMenus()
     pAutoSaveAction->setChecked(true);
     connect(pAutoSaveAction, &QAction::toggled, this, &MainWindow::onToggleAutoSave);
 
+    QAction* pExportAction = pFileMenu->addAction(QStringLiteral("导出 PNG(&E)…"));
+    pExportAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
+    connect(pExportAction, &QAction::triggered, this, &MainWindow::onExportPng);
+
     pFileMenu->addSeparator();
 
     QAction* pExitAction = pFileMenu->addAction(QStringLiteral("退出(&X)"));
@@ -239,6 +250,12 @@ void MainWindow::createMenus()
     QAction* pPasteAction = pEditMenu->addAction(QStringLiteral("粘贴(&P)"));
     pPasteAction->setShortcut(QKeySequence::Paste);
     connect(pPasteAction, &QAction::triggered, this, &MainWindow::onPaste);
+
+    pEditMenu->addSeparator();
+
+    QAction* pCopyPageAction = pEditMenu->addAction(QStringLiteral("复制当前页到剪贴板(&B)"));
+    pCopyPageAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+C")));
+    connect(pCopyPageAction, &QAction::triggered, this, &MainWindow::onCopyPageToClipboard);
 
     pEditMenu->addSeparator();
 
@@ -519,6 +536,180 @@ void MainWindow::onSaveProject()
     } else {
         QMessageBox::critical(this, QStringLiteral("保存"), strErrorMessage);
     }
+}
+
+void MainWindow::onExportPng()
+{
+    if (!m_pProjectManager->hasProject()) {
+        statusBar()->showMessage(QStringLiteral("请先打开项目"), 3000);
+        return;
+    }
+    Page* pCurrentPage = currentPage();
+    if (!pCurrentPage) {
+        QMessageBox::information(this, QStringLiteral("导出 PNG"),
+                                 QStringLiteral("请先在左侧选择要导出的页面"));
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("导出 PNG"));
+    auto* pFormLayout = new QFormLayout(&dialog);
+
+    // 导出范围
+    auto* pTargetGroup = new QGroupBox(QStringLiteral("导出范围"), &dialog);
+    auto* pTargetLayout = new QVBoxLayout(pTargetGroup);
+    auto* pRadioCurrentPage = new QRadioButton(QStringLiteral("当前页"), pTargetGroup);
+    auto* pRadioWalkthrough = new QRadioButton(QStringLiteral("当前攻略全部页"), pTargetGroup);
+    pRadioCurrentPage->setChecked(true);
+    pTargetLayout->addWidget(pRadioCurrentPage);
+    pTargetLayout->addWidget(pRadioWalkthrough);
+    pFormLayout->addRow(pTargetGroup);
+
+    // 导出形态
+    auto* pModeGroup = new QGroupBox(QStringLiteral("导出形态"), &dialog);
+    auto* pModeLayout = new QVBoxLayout(pModeGroup);
+    auto* pRadioSeparate = new QRadioButton(QStringLiteral("逐页 PNG"), pModeGroup);
+    auto* pRadioLong = new QRadioButton(QStringLiteral("长图（纵向拼接）"), pModeGroup);
+    auto* pSeparatorCheck = new QCheckBox(QStringLiteral("页间分隔线（长图）"), pModeGroup);
+    pRadioSeparate->setChecked(true);
+    pSeparatorCheck->setEnabled(false);
+    connect(pRadioLong, &QRadioButton::toggled, pSeparatorCheck, &QCheckBox::setEnabled);
+    pModeLayout->addWidget(pRadioSeparate);
+    pModeLayout->addWidget(pRadioLong);
+    pModeLayout->addWidget(pSeparatorCheck);
+    pFormLayout->addRow(pModeGroup);
+
+    // 倍率
+    auto* pScaleCombo = new QComboBox(&dialog);
+    pScaleCombo->addItem(QStringLiteral("1x（原尺寸）"), 1.0);
+    pScaleCombo->addItem(QStringLiteral("2x（推荐，抗平台压缩）"), 2.0);
+    pScaleCombo->addItem(QStringLiteral("3x"), 3.0);
+    pScaleCombo->setCurrentIndex(1);
+    pFormLayout->addRow(QStringLiteral("分辨率倍率："), pScaleCombo);
+
+    // 导出目录
+    auto* pDirEdit = new QLineEdit(&dialog);
+    pDirEdit->setPlaceholderText(QStringLiteral("选择导出目录…"));
+    auto* pBrowseButton = new QPushButton(QStringLiteral("浏览…"), &dialog);
+    connect(pBrowseButton, &QPushButton::clicked, &dialog, [pDirEdit]() {
+        const QString strDir = QFileDialog::getExistingDirectory(nullptr, QStringLiteral("选择导出目录"));
+        if (!strDir.isEmpty()) {
+            pDirEdit->setText(strDir);
+        }
+    });
+    auto* pDirRow = new QHBoxLayout;
+    pDirRow->addWidget(pDirEdit);
+    pDirRow->addWidget(pBrowseButton);
+    pFormLayout->addRow(QStringLiteral("导出到："), pDirRow);
+
+    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("导出"));
+    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    pFormLayout->addRow(pButtons);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QString strExportDir = pDirEdit->text().trimmed();
+    if (strExportDir.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("导出 PNG"), QStringLiteral("请选择导出目录"));
+        return;
+    }
+
+    // 收集导出页面与攻略标题
+    Project* pProject = m_pProjectManager->project();
+    QVector<Page> vecPages;
+    QString strWalkthroughTitle;
+    if (pRadioCurrentPage->isChecked()) {
+        vecPages.append(*pCurrentPage);
+        const QString strKey = selectedPageKey();
+        const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
+        if (nWalkthroughIndex >= 0 && nWalkthroughIndex < pProject->vecWalkthroughs.size()) {
+            strWalkthroughTitle = pProject->vecWalkthroughs.at(nWalkthroughIndex).strTitle;
+        }
+    } else {
+        const QString strKey = selectedPageKey();
+        const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
+        if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+            return;
+        }
+        const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+        strWalkthroughTitle = rWalkthrough.strTitle;
+        vecPages = rWalkthrough.vecPages;
+    }
+    if (vecPages.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("导出 PNG"), QStringLiteral("没有可导出的页面"));
+        return;
+    }
+
+    // 文件名净化：去掉 Windows 非法字符
+    QString strSafeTitle = strWalkthroughTitle;
+    strSafeTitle.replace(QRegularExpression(QStringLiteral(R"([\\/:*?"<>|])")), QStringLiteral("_"));
+    if (strSafeTitle.trimmed().isEmpty()) {
+        strSafeTitle = QStringLiteral("攻略");
+    }
+
+    const qreal dScale = pScaleCombo->currentData().toDouble();
+    const bool bLongImage = pRadioLong->isChecked();
+    const bool bSeparator = pSeparatorCheck->isChecked();
+    const QString strDirPath = QDir::cleanPath(strExportDir);
+
+    if (bLongImage) {
+        QString strErrorMessage;
+        const QImage image = ExportRenderer::renderLongImage(vecPages, dScale, bSeparator, &strErrorMessage);
+        if (image.isNull()) {
+            QMessageBox::critical(this, QStringLiteral("导出 PNG"), strErrorMessage);
+            return;
+        }
+        QProgressDialog progress(QStringLiteral("正在导出长图…"), QString(), 0, 1, this);
+        progress.setWindowModality(Qt::WindowModal);
+        progress.setValue(0);
+        const QString strFilePath = QDir(strDirPath).filePath(strSafeTitle + QStringLiteral("_长图.png"));
+        QString strWriteError;
+        if (!ExportRenderer::writePng(image, strFilePath, &strWriteError)) {
+            QMessageBox::critical(this, QStringLiteral("导出 PNG"), strWriteError);
+            return;
+        }
+        progress.setValue(1);
+        statusBar()->showMessage(QStringLiteral("已导出：%1").arg(strFilePath), 5000);
+        return;
+    }
+
+    // 逐页导出
+    QProgressDialog progress(QStringLiteral("正在导出…"), QString(), 0, vecPages.size(), this);
+    progress.setWindowModality(Qt::WindowModal);
+    int nExported = 0;
+    for (int nIndex = 0; nIndex < vecPages.size(); ++nIndex) {
+        progress.setValue(nIndex);
+        if (progress.wasCanceled()) {
+            break;
+        }
+        const QImage image = ExportRenderer::renderPage(vecPages.at(nIndex), dScale);
+        const QString strFileName = QStringLiteral("%1_%2.png")
+                                        .arg(strSafeTitle)
+                                        .arg(nIndex + 1, 2, 10, QLatin1Char('0'));
+        if (ExportRenderer::writePng(image, QDir(strDirPath).filePath(strFileName), nullptr)) {
+            ++nExported;
+        }
+    }
+    progress.setValue(vecPages.size());
+    statusBar()->showMessage(QStringLiteral("已导出 %1/%2 张到 %3")
+                                 .arg(nExported).arg(vecPages.size()).arg(strDirPath), 5000);
+}
+
+void MainWindow::onCopyPageToClipboard()
+{
+    Page* pPage = currentPage();
+    if (!pPage) {
+        statusBar()->showMessage(QStringLiteral("请先在左侧选择要复制的页面"), 3000);
+        return;
+    }
+    const QImage image = ExportRenderer::renderPage(*pPage, 2.0);
+    QApplication::clipboard()->setImage(image);
+    statusBar()->showMessage(QStringLiteral("当前页已复制到剪贴板（2x），可直接粘贴到小黑盒"), 4000);
 }
 
 void MainWindow::onToggleAutoSave(bool bEnabled)

@@ -30,6 +30,7 @@
 #include <QtMath>
 
 #include "editor/CanvasScene.h"
+#include "core/ComponentPainter.h"
 
 namespace bwm {
 
@@ -100,99 +101,8 @@ void ComponentItem::paint(QPainter* pPainter, const QStyleOptionGraphicsItem*, Q
 void ComponentItem::paintContent(QPainter* pPainter)
 {
     const QRectF contentRect(0, 0, m_component.size.width(), m_component.size.height());
-
-    if (m_component.eType == E_COMPONENT_TYPE_IMAGE) {
-        if (!m_imageCache.isNull()) {
-            // 保持纵横比居中绘制
-            const QSizeF scaled = m_imageCache.size().scaled(contentRect.size().toSize(), Qt::KeepAspectRatio);
-            const QRectF targetRect((contentRect.width() - scaled.width()) / 2,
-                                    (contentRect.height() - scaled.height()) / 2,
-                                    scaled.width(), scaled.height());
-            pPainter->drawImage(targetRect, m_imageCache);
-        } else {
-            pPainter->fillRect(contentRect, QColor(220, 220, 220));
-            pPainter->drawText(contentRect, Qt::AlignCenter, QStringLiteral("图片加载失败"));
-        }
-        return;
-    }
-
-    if (m_component.eType == E_COMPONENT_TYPE_TEXT) {
-        const TextData& rText = m_component.textData;
-        QFont font(rText.strFontFamily.isEmpty() ? QStringLiteral("Microsoft YaHei") : rText.strFontFamily);
-        font.setPixelSize(rText.nFontSize);
-        font.setBold(rText.bBold);
-        pPainter->setFont(font);
-        pPainter->setPen(rText.color);
-        pPainter->drawText(contentRect, rText.nAlign, rText.strContent);
-        return;
-    }
-
-    if (m_component.eType == E_COMPONENT_TYPE_TABLE) {
-        const TableData& rTable = m_component.tableData;
-        // 计算行列数
-        const int nRows = rTable.vecRows.size();
-        int nCols = 1;
-        for (const QStringList& rRow : rTable.vecRows) {
-            nCols = qMax(nCols, rRow.size());
-        }
-        if (nRows == 0) {
-            pPainter->setPen(QPen(rTable.borderColor, 1));
-            pPainter->setBrush(Qt::NoBrush);
-            pPainter->drawRect(contentRect);
-            return;
-        }
-        const qreal dCellWidth = contentRect.width() / nCols;
-        const qreal dCellHeight = contentRect.height() / nRows;
-        QFont font(QStringLiteral("Microsoft YaHei"));
-        font.setPixelSize(rTable.nFontSize);
-        pPainter->setFont(font);
-
-        for (int nRow = 0; nRow < nRows; ++nRow) {
-            const QStringList& rRowData = rTable.vecRows.at(nRow);
-            for (int nCol = 0; nCol < nCols; ++nCol) {
-                const QRectF cellRect(nCol * dCellWidth, nRow * dCellHeight, dCellWidth, dCellHeight);
-                // 背景：表头 / 斑马纹 / 白
-                QColor fillColor(Qt::white);
-                if (nRow == 0 && rTable.bShowHeader) {
-                    fillColor = rTable.headerColor;
-                } else if (rTable.bAlternateRow && (nRow % 2 == 0)) {
-                    fillColor = QColor(245, 245, 245);
-                }
-                pPainter->fillRect(cellRect, fillColor);
-                pPainter->setPen(QPen(rTable.borderColor, 1));
-                pPainter->drawRect(cellRect);
-                // 文本
-                pPainter->setPen(rTable.textColor);
-                const QString strCell = nCol < rRowData.size() ? rRowData.at(nCol) : QString();
-                pPainter->drawText(cellRect.adjusted(4, 0, -4, 0),
-                                   Qt::AlignLeft | Qt::AlignVCenter, strCell);
-            }
-        }
-        return;
-    }
-
-    // 形状
-    const ShapeData& rShape = m_component.shapeData;
-    QPainterPath path;
-    switch (rShape.eShapeType) {
-    case E_SHAPE_TYPE_ROUND_RECT:
-        path.addRoundedRect(contentRect, 12, 12);
-        break;
-    case E_SHAPE_TYPE_ELLIPSE:
-        path.addEllipse(contentRect);
-        break;
-    case E_SHAPE_TYPE_LINE: {
-        pPainter->setPen(QPen(rShape.borderColor, rShape.nBorderWidth));
-        pPainter->drawLine(QPointF(0, 0), QPointF(m_component.size.width(), m_component.size.height()));
-        return;
-    }
-    case E_SHAPE_TYPE_RECTANGLE:
-    default:
-        path.addRect(contentRect);
-        break;
-    }
-    pPainter->fillPath(path, rShape.fillColor);
-    pPainter->strokePath(path, QPen(rShape.borderColor, rShape.nBorderWidth));
+    // 与导出共用同一渲染实现（见 core/ComponentPainter）
+    ComponentPainter::paint(pPainter, m_component, contentRect, &m_imageCache);
 }
 
 void ComponentItem::paintSelectionDecoration(QPainter* pPainter)

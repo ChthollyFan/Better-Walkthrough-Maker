@@ -1,8 +1,10 @@
-# 核心库：数据模型、序列化、项目管理、设置（主程序与单元测试共用）
+# 核心库：数据模型、序列化、项目管理、设置、渲染与导出（主程序与单元测试共用）
 add_library(bwm_core STATIC
   core/Component.cpp
+  core/ComponentPainter.cpp
   core/Project.cpp
   core/ProjectSerializer.cpp
+  export/ExportRenderer.cpp
   project/ProjectManager.cpp
   settings/Settings.cpp
 )
