@@ -445,10 +445,16 @@ void ComponentItem::editContent()
 
     auto* pColorButton = new QPushButton(&dialog);
     QColor color = m_component.textData.color;
-    pColorButton->setStyleSheet(QStringLiteral("background-color: %1;").arg(color.name()));
+    // 按钮展示当前颜色：色块背景 + 色值文字（按亮度自动黑/白字）+ 边框
     const auto updateColorButton = [pColorButton](const QColor& rColor) {
-        pColorButton->setStyleSheet(QStringLiteral("background-color: %1;").arg(rColor.name()));
+        const QString strTextColor = rColor.lightness() > 128 ? QStringLiteral("black")
+                                                              : QStringLiteral("white");
+        pColorButton->setText(rColor.name(QColor::HexRgb));
+        pColorButton->setStyleSheet(QStringLiteral(
+            "background-color: %1; color: %2; border: 1px solid gray;")
+            .arg(rColor.name(QColor::HexRgb), strTextColor));
     };
+    updateColorButton(color);
     connect(pColorButton, &QPushButton::clicked, &dialog, [pColorButton, &color, updateColorButton]() {
         const QColor chosen = QColorDialog::getColor(color, pColorButton, QStringLiteral("选择文字颜色"));
         if (chosen.isValid()) {
