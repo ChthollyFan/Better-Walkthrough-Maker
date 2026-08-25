@@ -19,6 +19,7 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QCursor>
+#include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -52,6 +53,7 @@
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QUndoStack>
+#include <QUrl>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -75,8 +77,26 @@ QString componentDisplayName(const Component& rComponent)
     case E_COMPONENT_TYPE_TEXT:
         return rComponent.textData.strContent.left(12);
     case E_COMPONENT_TYPE_SHAPE:
-    default:
         return QStringLiteral("形状");
+    case E_COMPONENT_TYPE_TABLE:
+        return QStringLiteral("表格");
+    default:
+        return QStringLiteral("组件");
+    }
+}
+
+// 导出完成提示：显示成功信息并支持一键打开导出目录
+void showExportResult(QWidget* pParent, int nCount, const QString& strDirPath)
+{
+    QMessageBox box(pParent);
+    box.setWindowTitle(QStringLiteral("导出完成"));
+    box.setIcon(QMessageBox::Information);
+    box.setText(QStringLiteral("已成功导出 %1 张图片到：\n%2").arg(nCount).arg(strDirPath));
+    QPushButton* pOpenButton = box.addButton(QStringLiteral("打开目录"), QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Close);
+    box.exec();
+    if (box.clickedButton() == pOpenButton) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(strDirPath));
     }
 }
 
@@ -695,7 +715,7 @@ void MainWindow::onExportPng()
             return;
         }
         progress.setValue(1);
-        statusBar()->showMessage(QStringLiteral("已导出：%1").arg(strFilePath), 5000);
+        showExportResult(this, 1, strDirPath);
         return;
     }
 
@@ -717,8 +737,11 @@ void MainWindow::onExportPng()
         }
     }
     progress.setValue(vecPages.size());
-    statusBar()->showMessage(QStringLiteral("已导出 %1/%2 张到 %3")
-                                 .arg(nExported).arg(vecPages.size()).arg(strDirPath), 5000);
+    if (nExported > 0) {
+        showExportResult(this, nExported, strDirPath);
+    } else {
+        statusBar()->showMessage(QStringLiteral("导出失败，请检查目录权限"), 5000);
+    }
 }
 
 void MainWindow::onCopyPageToClipboard()
