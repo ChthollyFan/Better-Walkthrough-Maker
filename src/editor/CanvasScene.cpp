@@ -35,6 +35,12 @@ void CanvasScene::loadPage(const Page& rPage)
     rebuildItems(rPage.vecComponents);
 }
 
+void CanvasScene::clearPage()
+{
+    clear();
+    m_vecItems.clear();
+}
+
 void CanvasScene::syncToModel(Page* pPage)
 {
     if (!pPage) {

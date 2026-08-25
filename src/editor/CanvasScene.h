@@ -23,6 +23,8 @@ public:
 
     // 用页面数据重建场景（清空后按 zOrder 创建全部组件图元）
     void loadPage(const Page& rPage);
+    // 清空场景与组件列表（无页面/切换页面时使用，避免悬空指针）
+    void clearPage();
     // 将场景内全部组件写回页面模型（按 zOrder 排序）
     void syncToModel(Page* pPage);
     // 新增一个组件（自动分配 id 与 zOrder），返回创建的图元

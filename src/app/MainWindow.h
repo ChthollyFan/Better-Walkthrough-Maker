@@ -47,6 +47,12 @@ private slots:
     void onProjectTreeSelectionChanged();
     void onProjectOpened();
     void onAutoSavePerformed(bool bOk, const QString& strMessage);
+    // 攻略 / 页面管理
+    void onTreeContextMenu(const QPoint& rPos);
+    void onAddWalkthrough();
+    void onAddPage();
+    void onRenameNode();
+    void onDeleteNode();
 
     // 插入组件
     void onAddImageComponent();
@@ -109,6 +115,8 @@ private:
     void openProjectPath(const QString& strJsonPath);
     void refreshRecentProjectsMenu();
     QString selectedPageKey() const;
+    QString selectedNodeKey() const;
+    void selectNodeByKey(const QString& rKey);
     Page* currentPage();
     // 当前页组件快照（撤销命令用）
     QVector<Component> currentComponents();

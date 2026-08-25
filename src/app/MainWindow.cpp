@@ -33,6 +33,7 @@
 #include <QIcon>
 #include <QImage>
 #include <QInputDialog>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListView>
 #include <QListWidget>
@@ -191,6 +192,18 @@ void MainWindow::createMenus()
     QAction* pExitAction = pFileMenu->addAction(QStringLiteral("退出(&X)"));
     pExitAction->setShortcut(QKeySequence::Quit);
     connect(pExitAction, &QAction::triggered, this, &QWidget::close);
+
+    // 攻略菜单：新建/重命名/删除 攻略与页面（作用于当前选中节点）
+    QMenu* pWalkthroughMenu = menuBar()->addMenu(QStringLiteral("攻略(&W)"));
+    QAction* pAddWalkthroughAction = pWalkthroughMenu->addAction(QStringLiteral("新建攻略(&N)"));
+    connect(pAddWalkthroughAction, &QAction::triggered, this, &MainWindow::onAddWalkthrough);
+    QAction* pAddPageAction = pWalkthroughMenu->addAction(QStringLiteral("新建页面(&P)"));
+    connect(pAddPageAction, &QAction::triggered, this, &MainWindow::onAddPage);
+    pWalkthroughMenu->addSeparator();
+    QAction* pRenameNodeAction = pWalkthroughMenu->addAction(QStringLiteral("重命名(&R)…"));
+    connect(pRenameNodeAction, &QAction::triggered, this, &MainWindow::onRenameNode);
+    QAction* pDeleteNodeAction = pWalkthroughMenu->addAction(QStringLiteral("删除(&D)…"));
+    connect(pDeleteNodeAction, &QAction::triggered, this, &MainWindow::onDeleteNode);
 
     // 插入菜单
     QMenu* pInsertMenu = menuBar()->addMenu(QStringLiteral("插入(&I)"));
@@ -369,8 +382,11 @@ void MainWindow::createCentralWidget()
     m_pProjectTree = new QTreeWidget(this);
     m_pProjectTree->setHeaderLabel(QStringLiteral("项目结构"));
     m_pProjectTree->setMinimumWidth(200);
+    m_pProjectTree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_pProjectTree, &QTreeWidget::itemSelectionChanged,
             this, &MainWindow::onProjectTreeSelectionChanged);
+    connect(m_pProjectTree, &QTreeWidget::customContextMenuRequested,
+            this, &MainWindow::onTreeContextMenu);
 
     m_pView = new CanvasView(m_pScene, this);
 
@@ -602,6 +618,11 @@ void MainWindow::onExportPng()
     pDirRow->addWidget(pBrowseButton);
     pFormLayout->addRow(QStringLiteral("导出到："), pDirRow);
 
+    auto* pHintLabel = new QLabel(
+        QStringLiteral("提示：长图会把所选范围内的页面纵向拼接；若范围只有一个页面，长图与逐页导出结果相同。"), &dialog);
+    pHintLabel->setWordWrap(true);
+    pFormLayout->addRow(pHintLabel);
+
     auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("导出"));
     pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
@@ -800,6 +821,211 @@ QString MainWindow::selectedPageKey() const
     return strKey.contains(QLatin1Char(':')) ? strKey : QString();
 }
 
+QString MainWindow::selectedNodeKey() const
+{
+    const QList<QTreeWidgetItem*> selected = m_pProjectTree->selectedItems();
+    if (selected.isEmpty()) {
+        return QString();
+    }
+    return m_mapNodeKeys.value(selected.first());
+}
+
+void MainWindow::selectNodeByKey(const QString& rKey)
+{
+    for (auto it = m_mapNodeKeys.constBegin(); it != m_mapNodeKeys.constEnd(); ++it) {
+        if (it.value() == rKey) {
+            m_pProjectTree->setCurrentItem(it.key());
+            return;
+        }
+    }
+}
+
+void MainWindow::onTreeContextMenu(const QPoint& rPos)
+{
+    QTreeWidgetItem* pItem = m_pProjectTree->itemAt(rPos);
+    if (!pItem) {
+        return;
+    }
+    m_pProjectTree->setCurrentItem(pItem);
+    const QString strKey = m_mapNodeKeys.value(pItem);
+
+    QMenu menu(this);
+    QAction* pAddWalkthroughAction = nullptr;
+    QAction* pAddPageAction = nullptr;
+    QAction* pRenameAction = nullptr;
+    QAction* pDeleteAction = nullptr;
+    if (strKey.isEmpty()) {
+        // 项目节点
+        pAddWalkthroughAction = menu.addAction(QStringLiteral("新建攻略…"));
+    } else if (!strKey.contains(QLatin1Char(':'))) {
+        // 攻略节点
+        pAddPageAction = menu.addAction(QStringLiteral("新建页面…"));
+        menu.addSeparator();
+        pRenameAction = menu.addAction(QStringLiteral("重命名攻略…"));
+        pDeleteAction = menu.addAction(QStringLiteral("删除攻略…"));
+    } else {
+        // 页面节点
+        pRenameAction = menu.addAction(QStringLiteral("重命名页面…"));
+        pDeleteAction = menu.addAction(QStringLiteral("删除页面…"));
+    }
+    QAction* pChosen = menu.exec(m_pProjectTree->viewport()->mapToGlobal(rPos));
+    if (!pChosen) {
+        return;
+    }
+    if (pChosen == pAddWalkthroughAction) {
+        onAddWalkthrough();
+    } else if (pChosen == pAddPageAction) {
+        onAddPage();
+    } else if (pChosen == pRenameAction) {
+        onRenameNode();
+    } else if (pChosen == pDeleteAction) {
+        onDeleteNode();
+    }
+}
+
+void MainWindow::onAddWalkthrough()
+{
+    Project* pProject = m_pProjectManager->project();
+    if (!pProject) {
+        return;
+    }
+    Walkthrough walkthrough;
+    walkthrough.strTitle = QStringLiteral("攻略 %1").arg(pProject->vecWalkthroughs.size() + 1);
+    walkthrough.eType = E_WALKTHROUGH_TYPE_COVER;
+    Page page;
+    page.strName = QStringLiteral("页面 1");
+    page.size = Settings::defaultPageSize();
+    walkthrough.vecPages.append(page);
+    pProject->vecWalkthroughs.append(walkthrough);
+    m_pProjectManager->setDirty();
+    rebuildProjectTree();
+    updateWindowTitle();
+    selectNodeByKey(QString::number(pProject->vecWalkthroughs.size() - 1));
+}
+
+void MainWindow::onAddPage()
+{
+    Project* pProject = m_pProjectManager->project();
+    if (!pProject) {
+        return;
+    }
+    const QString strKey = selectedNodeKey();
+    if (strKey.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("请先选中一个攻略"), 3000);
+        return;
+    }
+    const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
+    if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        return;
+    }
+    Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+    Page page;
+    page.strName = QStringLiteral("页面 %1").arg(rWalkthrough.vecPages.size() + 1);
+    page.size = rWalkthrough.vecPages.isEmpty() ? Settings::defaultPageSize()
+                                                : rWalkthrough.vecPages.first().size;
+    rWalkthrough.vecPages.append(page);
+    m_pProjectManager->setDirty();
+    rebuildProjectTree();
+    updateWindowTitle();
+    selectNodeByKey(QStringLiteral("%1:%2").arg(nWalkthroughIndex).arg(rWalkthrough.vecPages.size() - 1));
+}
+
+void MainWindow::onRenameNode()
+{
+    Project* pProject = m_pProjectManager->project();
+    if (!pProject) {
+        return;
+    }
+    const QString strKey = selectedNodeKey();
+    QString strOldName;
+    if (strKey.isEmpty()) {
+        strOldName = pProject->strName;
+    } else {
+        const QStringList parts = strKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+            return;
+        }
+        if (parts.size() == 1) {
+            strOldName = pProject->vecWalkthroughs.at(nWalkthroughIndex).strTitle;
+        } else {
+            const int nPageIndex = parts.at(1).toInt();
+            const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+            if (nPageIndex < 0 || nPageIndex >= rWalkthrough.vecPages.size()) {
+                return;
+            }
+            strOldName = rWalkthrough.vecPages.at(nPageIndex).strName;
+        }
+    }
+    bool bOk = false;
+    const QString strNewName = QInputDialog::getText(this, QStringLiteral("重命名"),
+                                                     QStringLiteral("新名称："),
+                                                     QLineEdit::Normal, strOldName, &bOk);
+    if (!bOk || strNewName.trimmed().isEmpty() || strNewName == strOldName) {
+        return;
+    }
+    if (strKey.isEmpty()) {
+        pProject->strName = strNewName.trimmed();
+    } else {
+        const QStringList parts = strKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        if (parts.size() == 1) {
+            pProject->vecWalkthroughs[nWalkthroughIndex].strTitle = strNewName.trimmed();
+        } else {
+            const int nPageIndex = parts.at(1).toInt();
+            pProject->vecWalkthroughs[nWalkthroughIndex].vecPages[nPageIndex].strName = strNewName.trimmed();
+        }
+    }
+    m_pProjectManager->setDirty();
+    rebuildProjectTree();
+    updateWindowTitle();
+    selectNodeByKey(strKey);
+}
+
+void MainWindow::onDeleteNode()
+{
+    Project* pProject = m_pProjectManager->project();
+    if (!pProject) {
+        return;
+    }
+    const QString strKey = selectedNodeKey();
+    if (strKey.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("项目节点不可删除"), 3000);
+        return;
+    }
+    const QStringList parts = strKey.split(QLatin1Char(':'));
+    const int nWalkthroughIndex = parts.at(0).toInt();
+    if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        return;
+    }
+    QString strConfirm;
+    if (parts.size() == 1) {
+        strConfirm = QStringLiteral("确定删除攻略「%1」及其全部页面？")
+                         .arg(pProject->vecWalkthroughs.at(nWalkthroughIndex).strTitle);
+    } else {
+        const int nPageIndex = parts.at(1).toInt();
+        const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+        if (nPageIndex < 0 || nPageIndex >= rWalkthrough.vecPages.size()) {
+            return;
+        }
+        strConfirm = QStringLiteral("确定删除页面「%1」？")
+                         .arg(rWalkthrough.vecPages.at(nPageIndex).strName);
+    }
+    if (QMessageBox::question(this, QStringLiteral("删除"), strConfirm,
+                              QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+    if (parts.size() == 1) {
+        pProject->vecWalkthroughs.removeAt(nWalkthroughIndex);
+    } else {
+        pProject->vecWalkthroughs[nWalkthroughIndex].vecPages.removeAt(parts.at(1).toInt());
+    }
+    m_pProjectManager->setDirty();
+    rebuildProjectTree();
+    updateCanvasEditor();   // 若删除的是当前显示页面，画布同步清空
+    updateWindowTitle();
+}
+
 Page* MainWindow::currentPage()
 {
     const QString strPageKey = selectedPageKey();
@@ -824,7 +1050,7 @@ void MainWindow::updateCanvasEditor()
 {
     Page* pPage = currentPage();
     if (!pPage) {
-        m_pScene->clear();
+        m_pScene->clearPage();
         return;
     }
     m_bSyncingCanvas = true;
@@ -891,6 +1117,10 @@ void MainWindow::refreshLayerList()
 
 void MainWindow::onAddImageComponent()
 {
+    if (!currentPage()) {
+        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
+        return;
+    }
     const QString strFilePath = QFileDialog::getOpenFileName(
         this, QStringLiteral("选择图片"), QString(),
         QStringLiteral("图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.gif)"));
@@ -928,6 +1158,10 @@ void MainWindow::onAddImageComponent()
 
 void MainWindow::onAddTextComponent()
 {
+    if (!currentPage()) {
+        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
+        return;
+    }
     bool bOk = false;
     const QString strContent = QInputDialog::getText(
         this, QStringLiteral("插入文本"), QStringLiteral("文本内容："),
@@ -949,6 +1183,10 @@ void MainWindow::onAddTextComponent()
 
 void MainWindow::onAddShapeComponent(int nIndex)
 {
+    if (!currentPage()) {
+        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
+        return;
+    }
     Component component;
     component.eType = E_COMPONENT_TYPE_SHAPE;
     component.shapeData.eShapeType = static_cast<E_SHAPE_TYPE>(nIndex);
@@ -963,6 +1201,10 @@ void MainWindow::onAddShapeComponent(int nIndex)
 
 void MainWindow::onAddTableComponent()
 {
+    if (!currentPage()) {
+        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
+        return;
+    }
     Component component;
     component.eType = E_COMPONENT_TYPE_TABLE;
     component.size = QSizeF(420, 200);
@@ -1046,6 +1288,7 @@ void MainWindow::onPaste()
     }
     Page* pPage = currentPage();
     if (!pPage) {
+        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
         return;
     }
     const QVector<Component> vecBefore = pPage->vecComponents;
