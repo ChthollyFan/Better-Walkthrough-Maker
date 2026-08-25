@@ -324,6 +324,20 @@ void ComponentItem::mousePressEvent(QGraphicsSceneMouseEvent* pEvent)
         // 组件内部：允许移动（不调用基类，避免与手柄处理冲突）
         m_pressMouseLocal = localPos;
         setCursor(Qt::ClosedHandCursor);
+        // 多选联动：记录其余选中组件的起始位置
+        m_vecDragItems.clear();
+        m_vecDragStartPos.clear();
+        if (isSelected()) {
+            if (auto* pScene = qobject_cast<CanvasScene*>(scene())) {
+                const QVector<ComponentItem*> vecSelected = pScene->selectedComponentItems();
+                for (ComponentItem* pOther : vecSelected) {
+                    if (pOther != this) {
+                        m_vecDragItems.append(pOther);
+                        m_vecDragStartPos.append(pOther->component().pos);
+                    }
+                }
+            }
+        }
         return;
     }
     // 命中缩放手柄：记录，开始缩放
@@ -339,13 +353,22 @@ void ComponentItem::mouseMoveEvent(QGraphicsSceneMouseEvent* pEvent)
         return;
     }
     if (m_eActiveHandle == E_HANDLE_NONE) {
-        // 移动
-        QPointF newPos = m_pressPos + delta;
+        // 移动：先对整体位移做吸附，保证多选组件的相对位置不变
+        QPointF snappedDelta = delta;
         if (auto* pScene = qobject_cast<CanvasScene*>(scene())) {
-            newPos = pScene->snapRect(newPos, m_component.size, this);
+            const QPointF snappedPos = pScene->snapRect(m_pressPos + delta, m_component.size, this);
+            snappedDelta = snappedPos - m_pressPos;
         }
-        m_component.pos = newPos;
-        setPos(newPos);
+        m_component.pos = m_pressPos + snappedDelta;
+        setPos(m_component.pos);
+        // 联动移动其余选中组件（使用同一吸附后的位移）
+        for (int nIndex = 0; nIndex < m_vecDragItems.size(); ++nIndex) {
+            ComponentItem* pOther = m_vecDragItems.at(nIndex);
+            Component otherComponent = pOther->component();
+            otherComponent.pos = m_vecDragStartPos.at(nIndex) + snappedDelta;
+            pOther->setComponent(otherComponent);
+            emit pOther->geometryChanged();
+        }
         update();
         emit geometryChanged();
         return;
@@ -357,6 +380,8 @@ void ComponentItem::mouseMoveEvent(QGraphicsSceneMouseEvent* pEvent)
 void ComponentItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* pEvent)
 {
     m_eActiveHandle = E_HANDLE_NONE;
+    m_vecDragItems.clear();
+    m_vecDragStartPos.clear();
     setCursor(Qt::ArrowCursor);
     emit editFinished();
     QGraphicsObject::mouseReleaseEvent(pEvent);

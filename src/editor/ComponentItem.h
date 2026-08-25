@@ -76,6 +76,9 @@ private:
     qreal m_dRotateStartAngle = 0;            // 旋转起始角
     QPointF m_pressMouseScene;                // 按下时鼠标场景坐标
     QImage m_imageCache;                      // 图片组件缓存（避免重复加载）
+    // 多选拖拽：其余选中组件的起始位置（仅拖动按下组件时联动）
+    QVector<ComponentItem*> m_vecDragItems;
+    QVector<QPointF> m_vecDragStartPos;
 };
 
 } // namespace bwm
