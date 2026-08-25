@@ -1,5 +1,8 @@
 # 构建产物
 build/
 
+# 工具日志
+aqtinstall.log
+
 # 环境生成物
 dsh-usage/
