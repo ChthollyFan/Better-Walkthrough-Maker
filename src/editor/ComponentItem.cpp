@@ -13,11 +13,14 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGraphicsSceneMouseEvent>
+#include <QIcon>
 #include <QLineEdit>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QToolButton>
 #include <QtMath>
 
 #include "editor/CanvasScene.h"
@@ -30,6 +33,18 @@ constexpr qreal dHandleSize = 8;          // 手柄边长
 constexpr qreal dRotateHandleOffset = 24; // 旋转手柄距组件顶部的距离
 constexpr qreal dMinSize = 8;             // 组件最小边长
 constexpr qreal dHandleHitRadius = 6;     // 手柄命中半径
+
+// 生成一个带边框的色块图标（颜色预览用）。
+QIcon colorSwatchIcon(const QColor& rColor)
+{
+    QPixmap pixmap(16, 16);
+    pixmap.fill(rColor);
+    QPainter painter(&pixmap);
+    painter.setPen(QPen(QColor(120, 120, 120), 1));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(0, 0, pixmap.width() - 1, pixmap.height() - 1);
+    return QIcon(pixmap);
+}
 
 } // namespace
 
@@ -443,19 +458,16 @@ void ComponentItem::editContent()
     pAlignCombo->setCurrentIndex(nAlignIndex);
     pFormLayout->addRow(QStringLiteral("对齐："), pAlignCombo);
 
-    auto* pColorButton = new QPushButton(&dialog);
+    auto* pColorButton = new QToolButton(&dialog);
     QColor color = m_component.textData.color;
-    // 按钮展示当前颜色：色块背景 + 色值文字（按亮度自动黑/白字）+ 边框
+    // 按钮：正常外观 + 一个色块图标预览当前颜色（避免整块变色）
     const auto updateColorButton = [pColorButton](const QColor& rColor) {
-        const QString strTextColor = rColor.lightness() > 128 ? QStringLiteral("black")
-                                                              : QStringLiteral("white");
-        pColorButton->setText(rColor.name(QColor::HexRgb));
-        pColorButton->setStyleSheet(QStringLiteral(
-            "background-color: %1; color: %2; border: 1px solid gray;")
-            .arg(rColor.name(QColor::HexRgb), strTextColor));
+        pColorButton->setText(QStringLiteral("选择颜色"));
+        pColorButton->setIcon(colorSwatchIcon(rColor));
+        pColorButton->setIconSize(QSize(16, 16));
     };
     updateColorButton(color);
-    connect(pColorButton, &QPushButton::clicked, &dialog, [pColorButton, &color, updateColorButton]() {
+    connect(pColorButton, &QToolButton::clicked, &dialog, [pColorButton, &color, updateColorButton]() {
         const QColor chosen = QColorDialog::getColor(color, pColorButton, QStringLiteral("选择文字颜色"));
         if (chosen.isValid()) {
             color = chosen;
