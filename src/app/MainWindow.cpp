@@ -14,9 +14,11 @@
 #include "settings/Settings.h"
 
 #include <QAction>
+#include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QCursor>
 #include <QDesktopServices>
@@ -569,9 +571,44 @@ void MainWindow::onSaveProject()
     QString strErrorMessage;
     if (m_pProjectManager->save(&strErrorMessage)) {
         statusBar()->showMessage(QStringLiteral("已保存"), 3000);
+        updateWindowTitle();   // 清除标题脏标记 *
     } else {
         QMessageBox::critical(this, QStringLiteral("保存"), strErrorMessage);
     }
+}
+
+void MainWindow::closeEvent(QCloseEvent* pEvent)
+{
+    if (m_pProjectManager->hasProject() && m_pProjectManager->isDirty()) {
+        QMessageBox box(this);
+        box.setWindowTitle(QStringLiteral("未保存的更改"));
+        box.setIcon(QMessageBox::Question);
+        box.setText(QStringLiteral("项目「%1」有未保存的更改，是否保存？")
+                        .arg(m_pProjectManager->project()->strName));
+        QPushButton* pSaveButton = box.addButton(QStringLiteral("保存"), QMessageBox::AcceptRole);
+        QPushButton* pDiscardButton = box.addButton(QStringLiteral("不保存"), QMessageBox::DestructiveRole);
+        QPushButton* pCancelButton = box.addButton(QStringLiteral("取消"), QMessageBox::RejectRole);
+        box.setDefaultButton(pSaveButton);
+        box.exec();
+
+        const QAbstractButton* pClicked = box.clickedButton();
+        if (pClicked == pSaveButton) {
+            syncCanvasToModel();
+            QString strErrorMessage;
+            if (!m_pProjectManager->save(&strErrorMessage)) {
+                QMessageBox::critical(this, QStringLiteral("保存失败"), strErrorMessage);
+                pEvent->ignore();   // 保存失败，阻止关闭
+                return;
+            }
+            pEvent->accept();
+        } else if (pClicked == pCancelButton) {
+            pEvent->ignore();       // 取消关闭
+        } else {
+            pEvent->accept();       // 不保存直接关闭
+        }
+        return;
+    }
+    pEvent->accept();
 }
 
 void MainWindow::onExportPng()

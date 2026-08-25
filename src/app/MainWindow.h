@@ -36,6 +36,10 @@ public:
     explicit MainWindow(QWidget* pParent = nullptr);
     ~MainWindow() override;
 
+protected:
+    // 关闭前检查未保存更改（保存/不保存/取消）
+    void closeEvent(QCloseEvent* pEvent) override;
+
 private slots:
     void onNewProject();
     void onOpenProject();
