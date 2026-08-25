@@ -69,6 +69,10 @@ private slots:
     void onDistributeComponents(bool bHorizontal);
     // 右键菜单
     void onCanvasContextMenu(const QPointF& rScenePos);
+    // 素材库
+    void onImportAssets();
+    void onAssetDoubleClicked(QListWidgetItem* pItem);
+    void onAssetContextMenu(const QPoint& rPos);
     // 吸附开关
     void onToggleSnapToGrid(bool bEnable);
     void onToggleSnapToGuides(bool bEnable);
@@ -116,6 +120,8 @@ private:
     void setItemToTop(ComponentItem* pItem, bool bTop);
     // 右键菜单辅助
     ComponentItem* componentItemAt(const QPointF& rScenePos) const;
+    // 素材库：刷新缩略图列表
+    void refreshAssetList();
 
     ProjectManager* m_pProjectManager = nullptr;        // 项目管理
     CanvasScene* m_pScene = nullptr;                    // 画布场景
@@ -124,6 +130,7 @@ private:
     QListWidget* m_pLayerList = nullptr;                // 图层面板
     QMenu* m_pRecentProjectsMenu = nullptr;             // 最近项目菜单
     QToolBar* m_pToolBar = nullptr;                     // 工具栏
+    QListWidget* m_pAssetList = nullptr;                // 素材库列表
     QUndoStack* m_pUndoStack = nullptr;                 // 撤销栈
     bool m_bSyncingCanvas = false;                      // 防止同步时信号回环
     bool m_bInEditTransaction = false;                  // 是否处于编辑事务中

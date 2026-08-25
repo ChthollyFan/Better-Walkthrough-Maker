@@ -18,21 +18,29 @@
 #include <QCursor>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGraphicsScene>
 #include <QGraphicsView>
 #include <QHBoxLayout>
+#include <QIcon>
+#include <QImage>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QListView>
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPair>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QTabWidget>
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QUndoStack>
@@ -349,8 +357,32 @@ void MainWindow::createCentralWidget()
 
     m_pView = new CanvasView(m_pScene, this);
 
+    // 右侧标签页：素材库 + 图层
+    auto* pTabPanel = new QTabWidget(this);
+
+    // 素材库：导入按钮 + 缩略图网格，双击/右键插入到画布
+    auto* pAssetPanel = new QWidget(pTabPanel);
+    auto* pAssetLayout = new QVBoxLayout(pAssetPanel);
+    pAssetLayout->setContentsMargins(0, 0, 0, 0);
+    QPushButton* pImportButton = new QPushButton(QStringLiteral("导入素材…"), pAssetPanel);
+    connect(pImportButton, &QPushButton::clicked, this, &MainWindow::onImportAssets);
+    pAssetLayout->addWidget(pImportButton);
+
+    m_pAssetList = new QListWidget(pAssetPanel);
+    m_pAssetList->setViewMode(QListView::IconMode);
+    m_pAssetList->setIconSize(QSize(56, 56));
+    m_pAssetList->setResizeMode(QListView::Adjust);
+    m_pAssetList->setSpacing(4);
+    m_pAssetList->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_pAssetList, &QListWidget::itemDoubleClicked,
+            this, &MainWindow::onAssetDoubleClicked);
+    connect(m_pAssetList, &QListWidget::customContextMenuRequested,
+            this, &MainWindow::onAssetContextMenu);
+    pAssetLayout->addWidget(m_pAssetList);
+    pTabPanel->addTab(pAssetPanel, QStringLiteral("素材库"));
+
     // 图层面板：列表 + 操作按钮
-    auto* pLayerPanel = new QWidget(this);
+    auto* pLayerPanel = new QWidget(pTabPanel);
     auto* pLayerLayout = new QVBoxLayout(pLayerPanel);
     pLayerLayout->setContentsMargins(0, 0, 0, 0);
     m_pLayerList = new QListWidget(pLayerPanel);
@@ -375,11 +407,13 @@ void MainWindow::createCentralWidget()
     pLayerButtons->addWidget(pToTopButton);
     pLayerButtons->addWidget(pToBottomButton);
     pLayerLayout->addLayout(pLayerButtons);
+    pTabPanel->addTab(pLayerPanel, QStringLiteral("图层"));
+    pTabPanel->setCurrentIndex(1);   // 默认显示图层
 
     QSplitter* pSplitter = new QSplitter(Qt::Horizontal, this);
     pSplitter->addWidget(m_pProjectTree);
     pSplitter->addWidget(m_pView);
-    pSplitter->addWidget(pLayerPanel);
+    pSplitter->addWidget(pTabPanel);
     pSplitter->setStretchFactor(1, 1);
     pSplitter->setSizes({220, 900, 220});
 
@@ -522,6 +556,7 @@ void MainWindow::onProjectOpened()
 {
     rebuildProjectTree();
     refreshRecentProjectsMenu();
+    refreshAssetList();
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("已打开项目：%1").arg(m_pProjectManager->projectDirectory()), 5000);
 }
@@ -667,13 +702,30 @@ void MainWindow::onAddImageComponent()
 {
     const QString strFilePath = QFileDialog::getOpenFileName(
         this, QStringLiteral("选择图片"), QString(),
-        QStringLiteral("图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)"));
+        QStringLiteral("图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.gif)"));
     if (strFilePath.isEmpty()) {
         return;
     }
+    QString strAssetPath = strFilePath;
+    // 优先复制进项目 assets/（自包含；有项目时才复制）
+    if (m_pProjectManager->hasProject()) {
+        const QString strAssetsDir = m_pProjectManager->projectDirectory() + QStringLiteral("/assets");
+        QDir dir(strAssetsDir);
+        if (!dir.exists()) {
+            dir.mkpath(QStringLiteral("."));
+        }
+        const QFileInfo info(strFilePath);
+        const QString strTarget = dir.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces)
+                                               + QLatin1Char('.') + info.suffix());
+        if (QFile::copy(strFilePath, strTarget)) {
+            strAssetPath = strTarget;
+            refreshAssetList();
+        }
+    }
+
     Component component;
     component.eType = E_COMPONENT_TYPE_IMAGE;
-    component.imageData.strFilePath = strFilePath;
+    component.imageData.strFilePath = strAssetPath;
     component.size = QSizeF(300, 200);
     ComponentItem* pNewItem = m_pScene->addComponent(component);
     if (pNewItem) {
@@ -1043,6 +1095,120 @@ ComponentItem* MainWindow::componentItemAt(const QPointF& rScenePos) const
         }
     }
     return nullptr;
+}
+
+void MainWindow::refreshAssetList()
+{
+    m_pAssetList->clear();
+    if (!m_pProjectManager->hasProject()) {
+        return;
+    }
+    const QString strAssetsDir = m_pProjectManager->projectDirectory() + QStringLiteral("/assets");
+    QDir dir(strAssetsDir);
+    const QStringList filters = {QStringLiteral("*.png"), QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
+                                 QStringLiteral("*.bmp"), QStringLiteral("*.webp"), QStringLiteral("*.gif")};
+    const QStringList files = dir.entryList(filters, QDir::Files);
+    for (const QString& strFile : files) {
+        const QString strPath = dir.absoluteFilePath(strFile);
+        const QImage image(strPath);
+        auto* pItem = new QListWidgetItem(
+            QIcon(QPixmap::fromImage(image.scaled(56, 56, Qt::KeepAspectRatio, Qt::SmoothTransformation))),
+            strFile);
+        pItem->setData(Qt::UserRole, strPath);
+        pItem->setToolTip(strPath);
+        m_pAssetList->addItem(pItem);
+    }
+}
+
+void MainWindow::onImportAssets()
+{
+    if (!m_pProjectManager->hasProject()) {
+        statusBar()->showMessage(QStringLiteral("请先打开项目"), 3000);
+        return;
+    }
+    const QStringList files = QFileDialog::getOpenFileNames(
+        this, QStringLiteral("导入素材"), QString(),
+        QStringLiteral("图片 (*.png *.jpg *.jpeg *.bmp *.webp *.gif)"));
+    if (files.isEmpty()) {
+        return;
+    }
+    const QString strAssetsDir = m_pProjectManager->projectDirectory() + QStringLiteral("/assets");
+    QDir dir(strAssetsDir);
+    if (!dir.exists()) {
+        dir.mkpath(QStringLiteral("."));
+    }
+    for (const QString& strSource : files) {
+        const QFileInfo info(strSource);
+        const QString strTarget = dir.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces)
+                                               + QLatin1Char('.') + info.suffix());
+        QFile::copy(strSource, strTarget);
+    }
+    refreshAssetList();
+    statusBar()->showMessage(QStringLiteral("已导入 %1 个素材").arg(files.size()), 3000);
+}
+
+void MainWindow::onAssetDoubleClicked(QListWidgetItem* pItem)
+{
+    if (!pItem) {
+        return;
+    }
+    const QString strPath = pItem->data(Qt::UserRole).toString();
+    if (strPath.isEmpty()) {
+        return;
+    }
+    Component component;
+    component.eType = E_COMPONENT_TYPE_IMAGE;
+    component.imageData.strFilePath = strPath;
+    component.size = QSizeF(300, 200);
+    ComponentItem* pNewItem = m_pScene->addComponent(component);
+    if (pNewItem) {
+        m_pScene->clearSelection();
+        pNewItem->setSelected(true);
+        m_pView->centerOn(pNewItem);
+    }
+}
+
+void MainWindow::onAssetContextMenu(const QPoint& rPos)
+{
+    QListWidgetItem* pItem = m_pAssetList->itemAt(rPos);
+    if (!pItem) {
+        return;
+    }
+    QMenu menu(this);
+    QAction* pInsertAction = menu.addAction(QStringLiteral("插入到画布"));
+    QAction* pDeleteAction = menu.addAction(QStringLiteral("删除素材"));
+    QAction* pChosen = menu.exec(m_pAssetList->viewport()->mapToGlobal(rPos));
+    if (!pChosen) {
+        return;
+    }
+    if (pChosen == pInsertAction) {
+        onAssetDoubleClicked(pItem);
+    } else if (pChosen == pDeleteAction) {
+        const QString strPath = pItem->data(Qt::UserRole).toString();
+        // 引用检查：若任一页面的图片组件引用该素材，禁止删除
+        bool bInUse = false;
+        const Project* pProject = m_pProjectManager->project();
+        if (pProject) {
+            for (const Walkthrough& rWalkthrough : pProject->vecWalkthroughs) {
+                for (const Page& rPage : rWalkthrough.vecPages) {
+                    for (const Component& rComponent : rPage.vecComponents) {
+                        if (rComponent.eType == E_COMPONENT_TYPE_IMAGE
+                            && rComponent.imageData.strFilePath == strPath) {
+                            bInUse = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (bInUse) {
+            QMessageBox::warning(this, QStringLiteral("删除素材"),
+                                 QStringLiteral("该素材正被页面引用，无法删除"));
+            return;
+        }
+        QFile::remove(strPath);
+        refreshAssetList();
+    }
 }
 
 void MainWindow::moveLayer(int nOffset)
