@@ -5,11 +5,19 @@
  */
 #include "editor/ComponentItem.h"
 
+#include <QCheckBox>
+#include <QColorDialog>
+#include <QComboBox>
 #include <QCursor>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QGraphicsSceneMouseEvent>
-#include <QInputDialog>
+#include <QLineEdit>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPushButton>
+#include <QSpinBox>
 #include <QtMath>
 
 #include "editor/CanvasScene.h"
@@ -398,15 +406,77 @@ void ComponentItem::editContent()
     if (m_component.eType != E_COMPONENT_TYPE_TEXT) {
         return;
     }
-    bool bOk = false;
-    const QString strNewContent = QInputDialog::getText(
-        nullptr, QStringLiteral("编辑文本"), QStringLiteral("文本内容："),
-        QLineEdit::Normal, m_component.textData.strContent, &bOk);
-    if (bOk) {
-        m_component.textData.strContent = strNewContent;
+
+    emit editStarted();
+
+    // 文本样式编辑对话框：内容 / 字号 / 颜色 / 加粗 / 对齐
+    QDialog dialog;
+    dialog.setWindowTitle(QStringLiteral("编辑文本"));
+    auto* pFormLayout = new QFormLayout(&dialog);
+
+    auto* pContentEdit = new QLineEdit(&dialog);
+    pContentEdit->setText(m_component.textData.strContent);
+    pFormLayout->addRow(QStringLiteral("内容："), pContentEdit);
+
+    auto* pFontSizeSpin = new QSpinBox(&dialog);
+    pFontSizeSpin->setRange(6, 400);
+    pFontSizeSpin->setValue(m_component.textData.nFontSize);
+    pFormLayout->addRow(QStringLiteral("字号："), pFontSizeSpin);
+
+    auto* pBoldCheck = new QCheckBox(QStringLiteral("加粗"), &dialog);
+    pBoldCheck->setChecked(m_component.textData.bBold);
+    pFormLayout->addRow(QStringLiteral("样式："), pBoldCheck);
+
+    auto* pAlignCombo = new QComboBox(&dialog);
+    pAlignCombo->addItem(QStringLiteral("左对齐"), int(Qt::AlignLeft | Qt::AlignVCenter));
+    pAlignCombo->addItem(QStringLiteral("居中"), int(Qt::AlignHCenter | Qt::AlignVCenter));
+    pAlignCombo->addItem(QStringLiteral("右对齐"), int(Qt::AlignRight | Qt::AlignVCenter));
+    pAlignCombo->addItem(QStringLiteral("两端对齐"), int(Qt::AlignJustify | Qt::AlignVCenter));
+    const int nCurrentAlign = m_component.textData.nAlign;
+    int nAlignIndex = 0;
+    for (int nIndex = 0; nIndex < pAlignCombo->count(); ++nIndex) {
+        if (pAlignCombo->itemData(nIndex).toInt() == nCurrentAlign) {
+            nAlignIndex = nIndex;
+            break;
+        }
+    }
+    pAlignCombo->setCurrentIndex(nAlignIndex);
+    pFormLayout->addRow(QStringLiteral("对齐："), pAlignCombo);
+
+    auto* pColorButton = new QPushButton(&dialog);
+    QColor color = m_component.textData.color;
+    pColorButton->setStyleSheet(QStringLiteral("background-color: %1;").arg(color.name()));
+    const auto updateColorButton = [pColorButton](const QColor& rColor) {
+        pColorButton->setStyleSheet(QStringLiteral("background-color: %1;").arg(rColor.name()));
+    };
+    connect(pColorButton, &QPushButton::clicked, &dialog, [pColorButton, &color, updateColorButton]() {
+        const QColor chosen = QColorDialog::getColor(color, pColorButton, QStringLiteral("选择文字颜色"));
+        if (chosen.isValid()) {
+            color = chosen;
+            updateColorButton(chosen);
+        }
+    });
+    pFormLayout->addRow(QStringLiteral("颜色："), pColorButton);
+
+    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确定"));
+    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    pFormLayout->addRow(pButtons);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        m_component.textData.strContent = pContentEdit->text();
+        m_component.textData.nFontSize = pFontSizeSpin->value();
+        m_component.textData.bBold = pBoldCheck->isChecked();
+        m_component.textData.nAlign = pAlignCombo->currentData().toInt();
+        m_component.textData.color = color;
+        prepareGeometryChange();
         update();
         emit geometryChanged();
     }
+
+    emit editFinished();
 }
 
 void ComponentItem::hoverMoveEvent(QGraphicsSceneHoverEvent* pEvent)
