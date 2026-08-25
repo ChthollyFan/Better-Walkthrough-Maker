@@ -1,4 +1,10 @@
-#pragma once
+/**
+ * @file Settings.h
+ * @author zhangweimu
+ * @brief 全局设置（QSettings 持久化）的读写接口。
+ */
+#ifndef BWM_SETTINGS_SETTINGS_H
+#define BWM_SETTINGS_SETTINGS_H
 
 #include <QSize>
 #include <QString>
@@ -8,28 +14,29 @@ class QSettings;
 
 namespace bwm {
 
-// 全局设置（QSettings 持久化，规划第 5.8 节）。
-// 全部为静态接口，任何模块可直接调用。
+// 全局设置（QSettings 持久化，规划第 5.8 节）。全部为静态接口，任何模块可直接调用。
 class Settings {
 public:
     // 默认画布尺寸（新建项目向导使用）
     static QSize defaultPageSize();
-    static void setDefaultPageSize(const QSize &size);
+    static void setDefaultPageSize(const QSize& size);
 
     // 自动保存间隔（毫秒）
     static int autoSaveIntervalMs();
-    static void setAutoSaveIntervalMs(int intervalMs);
+    static void setAutoSaveIntervalMs(int nIntervalMs);
 
     // 作者署名（如小黑盒 ID）；导出时可选应用，M4 使用
     static QString authorName();
-    static void setAuthorName(const QString &name);
+    static void setAuthorName(const QString& strName);
 
     // 最近项目（json 路径列表，最近优先）
     static QStringList recentProjects();
-    static void setRecentProjects(const QStringList &paths);
+    static void setRecentProjects(const QStringList& vecPaths);
 
 private:
-    static QSettings &settings();
+    static QSettings& settings();
 };
 
 } // namespace bwm
+
+#endif // BWM_SETTINGS_SETTINGS_H

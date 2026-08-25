@@ -1,4 +1,10 @@
-#pragma once
+/**
+ * @file MainWindow.h
+ * @author zhangweimu
+ * @brief 主窗口：菜单栏、项目树、画布占位、状态栏（M1 骨架版）。
+ */
+#ifndef BWM_APP_MAINWINDOW_H
+#define BWM_APP_MAINWINDOW_H
 
 #include <QHash>
 #include <QMainWindow>
@@ -17,7 +23,7 @@ class ProjectManager;
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(QWidget* pParent = nullptr);
     ~MainWindow() override;
 
 private slots:
@@ -25,10 +31,10 @@ private slots:
     void onOpenProject();
     void onOpenRecentProject();
     void onSaveProject();
-    void onToggleAutoSave(bool enabled);
+    void onToggleAutoSave(bool bEnabled);
     void onProjectTreeSelectionChanged();
     void onProjectOpened();
-    void onAutoSavePerformed(bool ok, const QString &message);
+    void onAutoSavePerformed(bool bOk, const QString& strMessage);
 
 private:
     void createMenus();
@@ -37,17 +43,19 @@ private:
     void rebuildProjectTree();
     void updateCanvasPlaceholder();
     void updateWindowTitle();
-    void openProjectPath(const QString &jsonPath);
+    void openProjectPath(const QString& strJsonPath);
     void refreshRecentProjectsMenu();
     QString selectedPageKey() const;
 
-    ProjectManager *m_projectManager = nullptr;
-    QGraphicsScene *m_scene = nullptr;
-    QGraphicsView *m_view = nullptr;
-    QTreeWidget *m_projectTree = nullptr;
-    QMenu *m_recentProjectsMenu = nullptr;
+    ProjectManager* m_pProjectManager = nullptr;        // 项目管理
+    QGraphicsScene* m_pScene = nullptr;                 // 画布场景
+    QGraphicsView* m_pView = nullptr;                   // 画布视图
+    QTreeWidget* m_pProjectTree = nullptr;              // 项目树
+    QMenu* m_pRecentProjectsMenu = nullptr;             // 最近项目菜单
     // 树节点 → 数据路径（"攻略索引:页面索引" 或 "攻略索引" 或 空=项目）
-    QHash<QTreeWidgetItem *, QString> m_nodeKeys;
+    QHash<QTreeWidgetItem*, QString> m_mapNodeKeys;
 };
 
 } // namespace bwm
+
+#endif // BWM_APP_MAINWINDOW_H

@@ -1,4 +1,8 @@
-// 项目管理（创建/保存/打开/自动保存/崩溃恢复）的单元测试
+/**
+ * @file test_project_manager.cpp
+ * @author zhangweimu
+ * @brief 项目管理（创建/保存/打开/自动保存/崩溃恢复）的单元测试。
+ */
 #include <QtTest>
 
 #include <QDateTime>
@@ -36,112 +40,112 @@ void TestProjectManager::testCreateSaveOpen()
     QVERIFY(tempDir.isValid());
 
     ProjectManager manager;
-    QString errorMessage;
+    QString strErrorMessage;
     QVERIFY2(manager.createProject(QStringLiteral("艾尔登法环"), QSize(1080, 1440),
-                                   tempDir.path(), &errorMessage),
-             qPrintable(errorMessage));
+                                   tempDir.path(), &strErrorMessage),
+             qPrintable(strErrorMessage));
 
-    const QString projectDir = tempDir.filePath(QStringLiteral("艾尔登法环.bwm"));
-    QVERIFY(QDir(projectDir).exists());
-    QVERIFY(QDir(projectDir).exists(QStringLiteral("assets")));
-    QVERIFY(QFile::exists(projectDir + QStringLiteral("/project.json")));
+    const QString strProjectDir = tempDir.filePath(QStringLiteral("艾尔登法环.bwm"));
+    QVERIFY(QDir(strProjectDir).exists());
+    QVERIFY(QDir(strProjectDir).exists(QStringLiteral("assets")));
+    QVERIFY(QFile::exists(strProjectDir + QStringLiteral("/project.json")));
 
     // 新建项目自带一个攻略与一个页面
-    QCOMPARE(manager.project()->name, QStringLiteral("艾尔登法环"));
-    QCOMPARE(manager.project()->walkthroughs.size(), 1);
-    QCOMPARE(manager.project()->walkthroughs.at(0).pages.size(), 1);
-    QCOMPARE(manager.project()->walkthroughs.at(0).pages.at(0).size, QSize(1080, 1440));
+    QCOMPARE(manager.project()->strName, QStringLiteral("艾尔登法环"));
+    QCOMPARE(manager.project()->vecWalkthroughs.size(), 1);
+    QCOMPARE(manager.project()->vecWalkthroughs.at(0).vecPages.size(), 1);
+    QCOMPARE(manager.project()->vecWalkthroughs.at(0).vecPages.at(0).size, QSize(1080, 1440));
 
     // 用新的管理器打开同一项目，数据一致
     ProjectManager opener;
-    const QString jsonPath = projectDir + QStringLiteral("/project.json");
-    QVERIFY2(opener.openProject(jsonPath, &errorMessage), qPrintable(errorMessage));
-    QCOMPARE(opener.project()->name, QStringLiteral("艾尔登法环"));
-    QCOMPARE(opener.project()->walkthroughs.at(0).pages.at(0).size, QSize(1080, 1440));
+    const QString strJsonPath = strProjectDir + QStringLiteral("/project.json");
+    QVERIFY2(opener.openProject(strJsonPath, &strErrorMessage), qPrintable(strErrorMessage));
+    QCOMPARE(opener.project()->strName, QStringLiteral("艾尔登法环"));
+    QCOMPARE(opener.project()->vecWalkthroughs.at(0).vecPages.at(0).size, QSize(1080, 1440));
 }
 
 void TestProjectManager::testCreateInvalidName()
 {
     QTemporaryDir tempDir;
     ProjectManager manager;
-    QString errorMessage;
+    QString strErrorMessage;
 
-    QVERIFY(!manager.createProject(QString(), QSize(1080, 1440), tempDir.path(), &errorMessage));
-    QVERIFY(!errorMessage.isEmpty());
-    QVERIFY(!manager.createProject(QStringLiteral("   "), QSize(1080, 1440), tempDir.path(), &errorMessage));
+    QVERIFY(!manager.createProject(QString(), QSize(1080, 1440), tempDir.path(), &strErrorMessage));
+    QVERIFY(!strErrorMessage.isEmpty());
+    QVERIFY(!manager.createProject(QStringLiteral("   "), QSize(1080, 1440), tempDir.path(), &strErrorMessage));
 
     // 父目录不存在
     QVERIFY(!manager.createProject(QStringLiteral("游戏"), QSize(1080, 1440),
-                                   tempDir.path() + QStringLiteral("/不存在"), &errorMessage));
+                                   tempDir.path() + QStringLiteral("/不存在"), &strErrorMessage));
 }
 
 void TestProjectManager::testCreateDuplicate()
 {
     QTemporaryDir tempDir;
     ProjectManager manager;
-    QString errorMessage;
+    QString strErrorMessage;
 
     QVERIFY2(manager.createProject(QStringLiteral("重复测试"), QSize(1080, 1440),
-                                   tempDir.path(), &errorMessage),
-             qPrintable(errorMessage));
+                                   tempDir.path(), &strErrorMessage),
+             qPrintable(strErrorMessage));
     QVERIFY(!manager.createProject(QStringLiteral("重复测试"), QSize(1080, 1440),
-                                   tempDir.path(), &errorMessage));
+                                   tempDir.path(), &strErrorMessage));
 }
 
 void TestProjectManager::testOpenInvalidJson()
 {
     QTemporaryDir tempDir;
-    const QString jsonPath = tempDir.filePath(QStringLiteral("project.json"));
-    QFile file(jsonPath);
+    const QString strJsonPath = tempDir.filePath(QStringLiteral("project.json"));
+    QFile file(strJsonPath);
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.write("{{{ 损坏的 JSON");
     file.close();
 
     ProjectManager manager;
-    QString errorMessage;
-    QVERIFY(!manager.openProject(jsonPath, &errorMessage));
-    QVERIFY(!errorMessage.isEmpty());
+    QString strErrorMessage;
+    QVERIFY(!manager.openProject(strJsonPath, &strErrorMessage));
+    QVERIFY(!strErrorMessage.isEmpty());
 }
 
 void TestProjectManager::testRecoverSnapshot()
 {
     QTemporaryDir tempDir;
     ProjectManager manager;
-    QString errorMessage;
+    QString strErrorMessage;
     QVERIFY2(manager.createProject(QStringLiteral("恢复测试"), QSize(1080, 1440),
-                                   tempDir.path(), &errorMessage),
-             qPrintable(errorMessage));
+                                   tempDir.path(), &strErrorMessage),
+             qPrintable(strErrorMessage));
 
-    const QString projectDir = tempDir.filePath(QStringLiteral("恢复测试.bwm"));
-    const QString jsonPath = projectDir + QStringLiteral("/project.json");
-    const QString tmpPath = jsonPath + QStringLiteral(".tmp");
+    const QString strProjectDir = tempDir.filePath(QStringLiteral("恢复测试.bwm"));
+    const QString strJsonPath = strProjectDir + QStringLiteral("/project.json");
+    const QString strTmpPath = strJsonPath + QStringLiteral(".tmp");
 
     // 模拟一次未完成的保存：写入内容更新的 .tmp 残留
-    QFile tmpFile(tmpPath);
+    QFile tmpFile(strTmpPath);
     QVERIFY(tmpFile.open(QIODevice::WriteOnly));
     tmpFile.write(R"({"formatVersion":1,"name":"恢复后的名字"})");
     QVERIFY(tmpFile.setFileTime(QDateTime::currentDateTime().addSecs(60),
                                 QFileDevice::FileModificationTime));
     tmpFile.close();
 
-    QVERIFY(ProjectManager::hasRecoverableSnapshot(projectDir));
-    QVERIFY2(manager.recoverFromSnapshot(&errorMessage), qPrintable(errorMessage));
-    QVERIFY(!QFile::exists(tmpPath));
+    QVERIFY(ProjectManager::hasRecoverableSnapshot(strProjectDir));
+    QVERIFY2(manager.recoverFromSnapshot(&strErrorMessage), qPrintable(strErrorMessage));
+    QVERIFY(!QFile::exists(strTmpPath));
 
     // 重新打开，应读到恢复后的内容
     ProjectManager opener;
-    QVERIFY2(opener.openProject(jsonPath, &errorMessage), qPrintable(errorMessage));
-    QCOMPARE(opener.project()->name, QStringLiteral("恢复后的名字"));
+    QVERIFY2(opener.openProject(strJsonPath, &strErrorMessage), qPrintable(strErrorMessage));
+    QCOMPARE(opener.project()->strName, QStringLiteral("恢复后的名字"));
 }
 
 void TestProjectManager::testAutoSave()
 {
     QTemporaryDir tempDir;
     ProjectManager manager;
-    QString errorMessage;
+    QString strErrorMessage;
     QVERIFY2(manager.createProject(QStringLiteral("自动保存"), QSize(1080, 1440),
-                                   tempDir.path(), &errorMessage),
-             qPrintable(errorMessage));
+                                   tempDir.path(), &strErrorMessage),
+             qPrintable(strErrorMessage));
 
     manager.setAutoSaveIntervalMs(100);
     manager.setDirty();

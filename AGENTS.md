@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## 编码规范
+
+参考 /docs/C++语言编码规范.md
+
 ## 项目结构与模块组织
 
 当前结构（M1 骨架已落地）：

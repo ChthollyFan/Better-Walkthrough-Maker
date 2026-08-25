@@ -1,44 +1,56 @@
+/**
+ * @file Project.cpp
+ * @author zhangweimu
+ * @brief 项目数据模型的辅助函数实现（攻略类型字符串转换）。
+ */
 #include "core/Project.h"
 
 namespace bwm {
 
-QString walkthroughTypeToString(WalkthroughType type)
+QString walkthroughTypeToString(E_WALKTHROUGH_TYPE eType)
 {
-    switch (type) {
-    case WalkthroughType::Equipment:
+    switch (eType) {
+    case E_WALKTHROUGH_TYPE_EQUIPMENT:
         return QStringLiteral("equipment");
-    case WalkthroughType::StatsCompare:
+    case E_WALKTHROUGH_TYPE_STATS_COMPARE:
         return QStringLiteral("stats_compare");
-    case WalkthroughType::StoryFlow:
+    case E_WALKTHROUGH_TYPE_STORY_FLOW:
         return QStringLiteral("story_flow");
-    case WalkthroughType::WeaponReview:
+    case E_WALKTHROUGH_TYPE_WEAPON_REVIEW:
         return QStringLiteral("weapon_review");
-    case WalkthroughType::MapPoints:
+    case E_WALKTHROUGH_TYPE_MAP_POINTS:
         return QStringLiteral("map_points");
-    case WalkthroughType::Cover:
+    case E_WALKTHROUGH_TYPE_COVER:
         return QStringLiteral("cover");
-    case WalkthroughType::Custom:
+    case E_WALKTHROUGH_TYPE_CUSTOM:
+        return QStringLiteral("custom");
+    default:
         return QStringLiteral("custom");
     }
-    return QStringLiteral("custom");
 }
 
-WalkthroughType walkthroughTypeFromString(const QString &text)
+E_WALKTHROUGH_TYPE walkthroughTypeFromString(const QString& strText)
 {
-    if (text == QStringLiteral("equipment"))
-        return WalkthroughType::Equipment;
-    if (text == QStringLiteral("stats_compare"))
-        return WalkthroughType::StatsCompare;
-    if (text == QStringLiteral("story_flow"))
-        return WalkthroughType::StoryFlow;
-    if (text == QStringLiteral("weapon_review"))
-        return WalkthroughType::WeaponReview;
-    if (text == QStringLiteral("map_points"))
-        return WalkthroughType::MapPoints;
-    if (text == QStringLiteral("cover"))
-        return WalkthroughType::Cover;
+    if (strText == QStringLiteral("equipment")) {
+        return E_WALKTHROUGH_TYPE_EQUIPMENT;
+    }
+    if (strText == QStringLiteral("stats_compare")) {
+        return E_WALKTHROUGH_TYPE_STATS_COMPARE;
+    }
+    if (strText == QStringLiteral("story_flow")) {
+        return E_WALKTHROUGH_TYPE_STORY_FLOW;
+    }
+    if (strText == QStringLiteral("weapon_review")) {
+        return E_WALKTHROUGH_TYPE_WEAPON_REVIEW;
+    }
+    if (strText == QStringLiteral("map_points")) {
+        return E_WALKTHROUGH_TYPE_MAP_POINTS;
+    }
+    if (strText == QStringLiteral("cover")) {
+        return E_WALKTHROUGH_TYPE_COVER;
+    }
     // 未知字符串按 Custom 处理，保证旧文件或手写文件可打开
-    return WalkthroughType::Custom;
+    return E_WALKTHROUGH_TYPE_CUSTOM;
 }
 
 } // namespace bwm
