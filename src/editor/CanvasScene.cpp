@@ -26,9 +26,9 @@ void CanvasScene::loadPage(const Page& rPage)
     clear();
     m_vecItems.clear();
 
-    // 页面背景：白底 + 灰边框，不可选中、永远在最底层
+    // 页面背景：主题背景色 + 灰边框，不可选中、永远在最底层
     auto* pBackground = addRect(0, 0, rPage.size.width(), rPage.size.height(),
-                                QPen(QColor(140, 140, 140)), QBrush(Qt::white));
+                                QPen(QColor(140, 140, 140)), QBrush(m_pageBackgroundColor));
     pBackground->setZValue(-1);
     pBackground->setFlag(QGraphicsItem::ItemIsSelectable, false);
 
@@ -39,6 +39,12 @@ void CanvasScene::clearPage()
 {
     clear();
     m_vecItems.clear();
+}
+
+void CanvasScene::setPageBackgroundColor(const QColor& rColor)
+{
+    m_pageBackgroundColor = rColor;
+    update();
 }
 
 void CanvasScene::syncToModel(Page* pPage)

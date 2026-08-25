@@ -21,6 +21,17 @@ enum E_COMPONENT_TYPE {
     E_COMPONENT_TYPE_TEXT,        // 文本
     E_COMPONENT_TYPE_SHAPE,       // 形状
     E_COMPONENT_TYPE_TABLE,       // 表格
+    E_COMPONENT_TYPE_STICKER,     // 贴纸（装饰素材）
+};
+
+// 贴纸子类型（内置装饰素材包第一版）
+enum E_STICKER_TYPE {
+    E_STICKER_TYPE_TITLE_LINE = 0,   // 标题装饰线
+    E_STICKER_TYPE_CORNER_BADGE,     // 角标
+    E_STICKER_TYPE_STAR_RATING,      // 推荐度星标
+    E_STICKER_TYPE_ARROW,            // 箭头
+    E_STICKER_TYPE_DIVIDER,          // 分割线
+    E_STICKER_TYPE_CARD_BORDER,      // 卡片边框
 };
 
 // 形状子类型
@@ -66,6 +77,12 @@ struct TableData {
     bool bAlternateRow = false;                   // 斑马纹
 };
 
+// 贴纸组件数据：程序绘制的装饰元素（素材包第一版全部内置）。
+struct StickerData {
+    E_STICKER_TYPE eStickerType = E_STICKER_TYPE_TITLE_LINE;   // 贴纸类型
+    QColor color = QColor(0, 120, 215);                        // 主色
+};
+
 // 组件：画布元素。数据与渲染分离——本结构仅存数据，渲染由 editor/ComponentItem 完成。
 struct Component {
     QString strId;                        // 唯一 id（QUuid 字符串）
@@ -81,6 +98,7 @@ struct Component {
     TextData textData;                    // 文本数据（eType 为 TEXT 时有效）
     ShapeData shapeData;                  // 形状数据（eType 为 SHAPE 时有效）
     TableData tableData;                  // 表格数据（eType 为 TABLE 时有效）
+    StickerData stickerData;              // 贴纸数据（eType 为 STICKER 时有效）
 };
 
 // 组件类型与颜色的字符串转换（JSON 序列化用；字符串形式保证可读与迁移友好）
@@ -88,6 +106,8 @@ QString componentTypeToString(E_COMPONENT_TYPE eType);
 E_COMPONENT_TYPE componentTypeFromString(const QString& strType);
 QString shapeTypeToString(E_SHAPE_TYPE eShapeType);
 E_SHAPE_TYPE shapeTypeFromString(const QString& strShapeType);
+QString stickerTypeToString(E_STICKER_TYPE eStickerType);
+E_STICKER_TYPE stickerTypeFromString(const QString& strStickerType);
 QString colorToString(const QColor& rColor);
 QColor colorFromString(const QString& strColor);
 
@@ -126,6 +146,11 @@ inline bool operator==(const TableData& rLeft, const TableData& rRight)
         && rLeft.bAlternateRow == rRight.bAlternateRow;
 }
 
+inline bool operator==(const StickerData& rLeft, const StickerData& rRight)
+{
+    return rLeft.eStickerType == rRight.eStickerType && rLeft.color == rRight.color;
+}
+
 inline bool operator==(const Component& rLeft, const Component& rRight)
 {
     return rLeft.strId == rRight.strId
@@ -139,7 +164,8 @@ inline bool operator==(const Component& rLeft, const Component& rRight)
         && rLeft.imageData == rRight.imageData
         && rLeft.textData == rRight.textData
         && rLeft.shapeData == rRight.shapeData
-        && rLeft.tableData == rRight.tableData;
+        && rLeft.tableData == rRight.tableData
+        && rLeft.stickerData == rRight.stickerData;
 }
 
 inline bool operator!=(const Component& rLeft, const Component& rRight)

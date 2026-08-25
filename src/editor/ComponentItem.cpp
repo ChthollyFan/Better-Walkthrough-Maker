@@ -385,9 +385,25 @@ void ComponentItem::editContent()
     case E_COMPONENT_TYPE_TABLE:
         editTableContent();
         break;
+    case E_COMPONENT_TYPE_STICKER:
+        editStickerContent();
+        break;
     default:
         break;
     }
+}
+
+void ComponentItem::editStickerContent()
+{
+    emit editStarted();
+    const QColor chosen = QColorDialog::getColor(m_component.stickerData.color, nullptr,
+                                                 QStringLiteral("选择贴纸颜色"));
+    if (chosen.isValid() && chosen != m_component.stickerData.color) {
+        m_component.stickerData.color = chosen;
+        update();
+        emit geometryChanged();
+    }
+    emit editFinished();
 }
 
 void ComponentItem::editTextContent()

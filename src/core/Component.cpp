@@ -18,6 +18,8 @@ QString componentTypeToString(E_COMPONENT_TYPE eType)
         return QStringLiteral("shape");
     case E_COMPONENT_TYPE_TABLE:
         return QStringLiteral("table");
+    case E_COMPONENT_TYPE_STICKER:
+        return QStringLiteral("sticker");
     default:
         return QStringLiteral("shape");
     }
@@ -33,6 +35,9 @@ E_COMPONENT_TYPE componentTypeFromString(const QString& strType)
     }
     if (strType == QStringLiteral("table")) {
         return E_COMPONENT_TYPE_TABLE;
+    }
+    if (strType == QStringLiteral("sticker")) {
+        return E_COMPONENT_TYPE_STICKER;
     }
     // 未知类型按形状处理，保证文件可打开
     return E_COMPONENT_TYPE_SHAPE;
@@ -66,6 +71,46 @@ E_SHAPE_TYPE shapeTypeFromString(const QString& strShapeType)
         return E_SHAPE_TYPE_LINE;
     }
     return E_SHAPE_TYPE_RECTANGLE;
+}
+
+QString stickerTypeToString(E_STICKER_TYPE eStickerType)
+{
+    switch (eStickerType) {
+    case E_STICKER_TYPE_TITLE_LINE:
+        return QStringLiteral("title_line");
+    case E_STICKER_TYPE_CORNER_BADGE:
+        return QStringLiteral("corner_badge");
+    case E_STICKER_TYPE_STAR_RATING:
+        return QStringLiteral("star_rating");
+    case E_STICKER_TYPE_ARROW:
+        return QStringLiteral("arrow");
+    case E_STICKER_TYPE_DIVIDER:
+        return QStringLiteral("divider");
+    case E_STICKER_TYPE_CARD_BORDER:
+        return QStringLiteral("card_border");
+    default:
+        return QStringLiteral("title_line");
+    }
+}
+
+E_STICKER_TYPE stickerTypeFromString(const QString& strStickerType)
+{
+    if (strStickerType == QStringLiteral("corner_badge")) {
+        return E_STICKER_TYPE_CORNER_BADGE;
+    }
+    if (strStickerType == QStringLiteral("star_rating")) {
+        return E_STICKER_TYPE_STAR_RATING;
+    }
+    if (strStickerType == QStringLiteral("arrow")) {
+        return E_STICKER_TYPE_ARROW;
+    }
+    if (strStickerType == QStringLiteral("divider")) {
+        return E_STICKER_TYPE_DIVIDER;
+    }
+    if (strStickerType == QStringLiteral("card_border")) {
+        return E_STICKER_TYPE_CARD_BORDER;
+    }
+    return E_STICKER_TYPE_TITLE_LINE;
 }
 
 QString colorToString(const QColor& rColor)

@@ -51,12 +51,12 @@ void paintPageComponents(QPainter* pPainter, const Page& rPage, qreal dOffsetY)
 
 } // namespace
 
-QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale)
+QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor& rBackground)
 {
     const int nWidth = qMax(1, qRound(rPage.size.width() * dScale));
     const int nHeight = qMax(1, qRound(rPage.size.height() * dScale));
     QImage image(nWidth, nHeight, QImage::Format_ARGB32_Premultiplied);
-    image.fill(Qt::white);
+    image.fill(rBackground);
 
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing);
@@ -67,7 +67,7 @@ QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale)
 }
 
 QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale, bool bSeparator,
-                                       QString* pErrorMessage)
+                                       QString* pErrorMessage, const QColor& rBackground)
 {
     if (rPages.isEmpty()) {
         return QImage();
@@ -94,7 +94,7 @@ QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale
 
     QImage image(qMax(1, qRound(nWidth * dScale)), qMax(1, qRound(nTotalHeight * dScale)),
                  QImage::Format_ARGB32_Premultiplied);
-    image.fill(Qt::white);
+    image.fill(rBackground);
 
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing);
@@ -104,8 +104,8 @@ QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale
     qreal dOffsetY = 0;
     for (int nIndex = 0; nIndex < rPages.size(); ++nIndex) {
         const Page& rPage = rPages.at(nIndex);
-        // 页面背景（宽度不足最大宽时补白）
-        painter.fillRect(QRectF(0, dOffsetY, nWidth, rPage.size.height()), Qt::white);
+        // 页面背景（宽度不足最大宽时补背景色）
+        painter.fillRect(QRectF(0, dOffsetY, nWidth, rPage.size.height()), rBackground);
         paintPageComponents(&painter, rPage, dOffsetY);
         dOffsetY += rPage.size.height();
         if (bSeparator && nIndex < rPages.size() - 1) {

@@ -70,4 +70,14 @@ void Settings::setRecentProjects(const QStringList& vecPaths)
     settings().setValue(QStringLiteral("recentProjects"), vecPaths);
 }
 
+QString Settings::themeName()
+{
+    return settings().value(QStringLiteral("theme"), QStringLiteral("浅色简洁风")).toString();
+}
+
+void Settings::setThemeName(const QString& rName)
+{
+    settings().setValue(QStringLiteral("theme"), rName);
+}
+
 } // namespace bwm

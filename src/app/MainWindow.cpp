@@ -6,15 +6,19 @@
 #include "app/MainWindow.h"
 
 #include "core/Project.h"
+#include "core/Template.h"
 #include "editor/CanvasScene.h"
 #include "editor/CanvasView.h"
 #include "editor/ComponentItem.h"
 #include "export/ExportRenderer.h"
 #include "project/ProjectManager.h"
 #include "settings/Settings.h"
+#include "template/TemplateManager.h"
+#include "theme/Theme.h"
 
 #include <QAction>
 #include <QAbstractButton>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -82,6 +86,8 @@ QString componentDisplayName(const Component& rComponent)
         return QStringLiteral("形状");
     case E_COMPONENT_TYPE_TABLE:
         return QStringLiteral("表格");
+    case E_COMPONENT_TYPE_STICKER:
+        return QStringLiteral("贴纸");
     default:
         return QStringLiteral("组件");
     }
@@ -175,6 +181,8 @@ MainWindow::MainWindow(QWidget* pParent)
             this, &MainWindow::onComponentEditFinished);
     connect(m_pView, &CanvasView::contextMenuRequested,
             this, &MainWindow::onCanvasContextMenu);
+
+    applyTheme();   // 应用持久化的主题（画布背景色等）
 }
 
 MainWindow::~MainWindow() = default;
@@ -227,6 +235,14 @@ void MainWindow::createMenus()
     QAction* pDeleteNodeAction = pWalkthroughMenu->addAction(QStringLiteral("删除(&D)…"));
     connect(pDeleteNodeAction, &QAction::triggered, this, &MainWindow::onDeleteNode);
 
+    pWalkthroughMenu->addSeparator();
+    QAction* pSaveTemplateAction = pWalkthroughMenu->addAction(QStringLiteral("保存为模板(&T)…"));
+    connect(pSaveTemplateAction, &QAction::triggered, this, &MainWindow::onSaveAsTemplate);
+    QAction* pImportTemplateAction = pWalkthroughMenu->addAction(QStringLiteral("导入模板(&I)…"));
+    connect(pImportTemplateAction, &QAction::triggered, this, &MainWindow::onImportTemplate);
+    QAction* pExportTemplateAction = pWalkthroughMenu->addAction(QStringLiteral("导出当前攻略为模板(&E)…"));
+    connect(pExportTemplateAction, &QAction::triggered, this, &MainWindow::onExportTemplate);
+
     // 插入菜单
     QMenu* pInsertMenu = menuBar()->addMenu(QStringLiteral("插入(&I)"));
 
@@ -260,6 +276,24 @@ void MainWindow::createMenus()
     connect(pAddLineAction, &QAction::triggered, this, [this]() {
         onAddShapeComponent(static_cast<int>(E_SHAPE_TYPE_LINE));
     });
+
+    // 装饰贴纸子菜单（素材包第一版）
+    QMenu* pStickerMenu = pInsertMenu->addMenu(QStringLiteral("装饰(&D)"));
+    const QList<QPair<QString, int>> stickers = {
+        {QStringLiteral("标题装饰线"), E_STICKER_TYPE_TITLE_LINE},
+        {QStringLiteral("角标"), E_STICKER_TYPE_CORNER_BADGE},
+        {QStringLiteral("推荐度星标"), E_STICKER_TYPE_STAR_RATING},
+        {QStringLiteral("箭头"), E_STICKER_TYPE_ARROW},
+        {QStringLiteral("分割线"), E_STICKER_TYPE_DIVIDER},
+        {QStringLiteral("卡片边框"), E_STICKER_TYPE_CARD_BORDER},
+    };
+    for (const QPair<QString, int>& rSticker : stickers) {
+        QAction* pStickerAction = pStickerMenu->addAction(rSticker.first);
+        const int nStickerType = rSticker.second;
+        connect(pStickerAction, &QAction::triggered, this, [this, nStickerType]() {
+            onAddStickerComponent(nStickerType);
+        });
+    }
 
     // 编辑菜单
     QMenu* pEditMenu = menuBar()->addMenu(QStringLiteral("编辑(&E)"));
@@ -342,6 +376,25 @@ void MainWindow::createMenus()
     pSnapGuidesAction->setCheckable(true);
     pSnapGuidesAction->setChecked(m_pScene->snapToGuides());
     connect(pSnapGuidesAction, &QAction::toggled, this, &MainWindow::onToggleSnapToGuides);
+
+    // 主题菜单（内置两套配色）
+    QMenu* pThemeMenu = menuBar()->addMenu(QStringLiteral("主题(&T)"));
+    auto* pThemeGroup = new QActionGroup(this);
+    const QStringList themeNames = ThemeManager::themeNames();
+    const QString strCurrentTheme = ThemeManager::currentThemeName();
+    for (const QString& strName : themeNames) {
+        QAction* pThemeAction = pThemeMenu->addAction(strName);
+        pThemeAction->setCheckable(true);
+        pThemeAction->setData(strName);
+        if (strName == strCurrentTheme) {
+            pThemeAction->setChecked(true);
+        }
+        pThemeGroup->addAction(pThemeAction);
+    }
+    connect(pThemeGroup, &QActionGroup::triggered, this, [this](QAction* pAction) {
+        ThemeManager::setCurrentThemeName(pAction->data().toString());
+        applyTheme();
+    });
 }
 
 void MainWindow::createToolBar()
@@ -737,7 +790,8 @@ void MainWindow::onExportPng()
 
     if (bLongImage) {
         QString strErrorMessage;
-        const QImage image = ExportRenderer::renderLongImage(vecPages, dScale, bSeparator, &strErrorMessage);
+        const QImage image = ExportRenderer::renderLongImage(
+            vecPages, dScale, bSeparator, &strErrorMessage, ThemeManager::currentTheme().backgroundColor);
         if (image.isNull()) {
             QMessageBox::critical(this, QStringLiteral("导出 PNG"), strErrorMessage);
             return;
@@ -765,7 +819,8 @@ void MainWindow::onExportPng()
         if (progress.wasCanceled()) {
             break;
         }
-        const QImage image = ExportRenderer::renderPage(vecPages.at(nIndex), dScale);
+        const QImage image = ExportRenderer::renderPage(vecPages.at(nIndex), dScale,
+                                                        ThemeManager::currentTheme().backgroundColor);
         const QString strFileName = QStringLiteral("%1_%2.png")
                                         .arg(strSafeTitle)
                                         .arg(nIndex + 1, 2, 10, QLatin1Char('0'));
@@ -788,7 +843,8 @@ void MainWindow::onCopyPageToClipboard()
         statusBar()->showMessage(QStringLiteral("请先在左侧选择要复制的页面"), 3000);
         return;
     }
-    const QImage image = ExportRenderer::renderPage(*pPage, 2.0);
+    const QImage image = ExportRenderer::renderPage(*pPage, 2.0,
+                                                    ThemeManager::currentTheme().backgroundColor);
     QApplication::clipboard()->setImage(image);
     statusBar()->showMessage(QStringLiteral("当前页已复制到剪贴板（2x），可直接粘贴到小黑盒"), 4000);
 }
@@ -949,13 +1005,66 @@ void MainWindow::onAddWalkthrough()
     if (!pProject) {
         return;
     }
+    const QString strProjectDir = m_pProjectManager->projectDirectory();
+
+    // 模板选择对话框：内置 + 项目用户模板 + 空白
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("新建攻略 - 选择模板"));
+    dialog.resize(420, 380);
+    auto* pDialogLayout = new QVBoxLayout(&dialog);
+    auto* pTemplateList = new QListWidget(&dialog);
+    QVector<Template> vecTemplates = TemplateManager::allTemplates(strProjectDir);
+    for (const Template& rTemplate : vecTemplates) {
+        auto* pItem = new QListWidgetItem(QStringLiteral("%1（%2 页）")
+                                              .arg(rTemplate.strName).arg(rTemplate.vecPages.size()));
+        pItem->setToolTip(rTemplate.strDescription);
+        pItem->setData(Qt::UserRole, rTemplate.strName);
+        pTemplateList->addItem(pItem);
+    }
+    auto* pBlankItem = new QListWidgetItem(QStringLiteral("空白模板（1 页）"));
+    pBlankItem->setToolTip(QStringLiteral("从空白页开始，自行排版"));
+    pBlankItem->setData(Qt::UserRole, QString());
+    pTemplateList->addItem(pBlankItem);
+    pTemplateList->setCurrentRow(0);
+    pDialogLayout->addWidget(pTemplateList);
+
+    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("创建"));
+    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    pDialogLayout->addWidget(pButtons);
+
+    if (dialog.exec() != QDialog::Accepted || !pTemplateList->currentItem()) {
+        return;
+    }
+    const QString strChosenName = pTemplateList->currentItem()->data(Qt::UserRole).toString();
+
     Walkthrough walkthrough;
     walkthrough.strTitle = QStringLiteral("攻略 %1").arg(pProject->vecWalkthroughs.size() + 1);
-    walkthrough.eType = E_WALKTHROUGH_TYPE_COVER;
-    Page page;
-    page.strName = QStringLiteral("页面 1");
-    page.size = Settings::defaultPageSize();
-    walkthrough.vecPages.append(page);
+    if (strChosenName.isEmpty()) {
+        // 空白模板
+        walkthrough.eType = E_WALKTHROUGH_TYPE_COVER;
+        Page page;
+        page.strName = QStringLiteral("页面 1");
+        page.size = Settings::defaultPageSize();
+        walkthrough.vecPages.append(page);
+    } else {
+        // 应用选中模板：复制全部页面，并重新生成组件 id 避免重复
+        for (const Template& rTemplate : vecTemplates) {
+            if (rTemplate.strName == strChosenName) {
+                walkthrough.eType = rTemplate.eType;
+                walkthrough.vecPages = rTemplate.vecPages;
+                for (Page& rPage : walkthrough.vecPages) {
+                    for (Component& rComponent : rPage.vecComponents) {
+                        rComponent.strId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     pProject->vecWalkthroughs.append(walkthrough);
     m_pProjectManager->setDirty();
     rebuildProjectTree();
@@ -1084,6 +1193,154 @@ void MainWindow::onDeleteNode()
     rebuildProjectTree();
     updateCanvasEditor();   // 若删除的是当前显示页面，画布同步清空
     updateWindowTitle();
+}
+
+void MainWindow::onSaveAsTemplate()
+{
+    Project* pProject = m_pProjectManager->project();
+    if (!pProject) {
+        return;
+    }
+    const QString strKey = selectedNodeKey();
+    if (strKey.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("请先选中一个攻略"), 3000);
+        return;
+    }
+    const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
+    if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        return;
+    }
+    const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+    if (rWalkthrough.vecPages.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("保存为模板"), QStringLiteral("该攻略没有页面，无法保存为模板"));
+        return;
+    }
+    bool bOk = false;
+    const QString strTemplateName = QInputDialog::getText(
+        this, QStringLiteral("保存为模板"), QStringLiteral("模板名称："),
+        QLineEdit::Normal, rWalkthrough.strTitle, &bOk);
+    if (!bOk || strTemplateName.trimmed().isEmpty()) {
+        return;
+    }
+    Template t;
+    t.strName = strTemplateName.trimmed();
+    t.eType = rWalkthrough.eType;
+    t.strDescription = QStringLiteral("由攻略「%1」保存").arg(rWalkthrough.strTitle);
+    t.vecPages = rWalkthrough.vecPages;
+    QString strErrorMessage;
+    if (TemplateManager::saveTemplate(t, m_pProjectManager->projectDirectory(), &strErrorMessage)) {
+        statusBar()->showMessage(QStringLiteral("模板「%1」已保存").arg(t.strName), 4000);
+    } else {
+        QMessageBox::critical(this, QStringLiteral("保存为模板"), strErrorMessage);
+    }
+}
+
+void MainWindow::onImportTemplate()
+{
+    if (!m_pProjectManager->hasProject()) {
+        statusBar()->showMessage(QStringLiteral("请先打开项目"), 3000);
+        return;
+    }
+    const QString strJsonPath = QFileDialog::getOpenFileName(
+        this, QStringLiteral("导入模板"), QString(), QStringLiteral("攻略模板 (*.json)"));
+    if (strJsonPath.isEmpty()) {
+        return;
+    }
+    QString strErrorMessage;
+    if (TemplateManager::importTemplate(strJsonPath, m_pProjectManager->projectDirectory(),
+                                        &strErrorMessage)) {
+        statusBar()->showMessage(QStringLiteral("模板已导入"), 4000);
+    } else {
+        QMessageBox::critical(this, QStringLiteral("导入模板"), strErrorMessage);
+    }
+}
+
+void MainWindow::onExportTemplate()
+{
+    Project* pProject = m_pProjectManager->project();
+    if (!pProject) {
+        return;
+    }
+    const QString strKey = selectedNodeKey();
+    if (strKey.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("请先选中一个攻略"), 3000);
+        return;
+    }
+    const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
+    if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        return;
+    }
+    const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+    if (rWalkthrough.vecPages.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("导出模板"), QStringLiteral("该攻略没有页面，无法导出"));
+        return;
+    }
+    QString strSafeName = rWalkthrough.strTitle;
+    strSafeName.replace(QRegularExpression(QStringLiteral(R"([\\/:*?"<>|])")), QStringLiteral("_"));
+    const QString strDestPath = QFileDialog::getSaveFileName(
+        this, QStringLiteral("导出模板"), strSafeName + QStringLiteral(".json"),
+        QStringLiteral("攻略模板 (*.json)"));
+    if (strDestPath.isEmpty()) {
+        return;
+    }
+    Template t;
+    t.strName = rWalkthrough.strTitle;
+    t.eType = rWalkthrough.eType;
+    t.vecPages = rWalkthrough.vecPages;
+    QString strErrorMessage;
+    if (TemplateSerializer::writeFile(t, strDestPath, &strErrorMessage)) {
+        statusBar()->showMessage(QStringLiteral("模板已导出：%1").arg(strDestPath), 4000);
+    } else {
+        QMessageBox::critical(this, QStringLiteral("导出模板"), strErrorMessage);
+    }
+}
+
+void MainWindow::onAddStickerComponent(int nIndex)
+{
+    if (!currentPage()) {
+        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
+        return;
+    }
+    Component component;
+    component.eType = E_COMPONENT_TYPE_STICKER;
+    component.stickerData.eStickerType = static_cast<E_STICKER_TYPE>(nIndex);
+    component.stickerData.color = ThemeManager::currentTheme().primaryColor;
+    // 按贴纸类型给默认尺寸
+    switch (component.stickerData.eStickerType) {
+    case E_STICKER_TYPE_TITLE_LINE:
+        component.size = QSizeF(320, 16);
+        break;
+    case E_STICKER_TYPE_CORNER_BADGE:
+        component.size = QSizeF(60, 40);
+        break;
+    case E_STICKER_TYPE_STAR_RATING:
+        component.size = QSizeF(160, 28);
+        break;
+    case E_STICKER_TYPE_ARROW:
+        component.size = QSizeF(120, 40);
+        break;
+    case E_STICKER_TYPE_DIVIDER:
+        component.size = QSizeF(320, 12);
+        break;
+    case E_STICKER_TYPE_CARD_BORDER:
+    default:
+        component.size = QSizeF(320, 180);
+        break;
+    }
+    ComponentItem* pNewItem = m_pScene->addComponent(component);
+    if (pNewItem) {
+        m_pScene->clearSelection();
+        pNewItem->setSelected(true);
+        m_pView->centerOn(pNewItem);
+    }
+}
+
+void MainWindow::applyTheme()
+{
+    const Theme theme = ThemeManager::currentTheme();
+    m_pScene->setPageBackgroundColor(theme.backgroundColor);
+    m_pView->viewport()->update();
+    updateCanvasEditor();
 }
 
 Page* MainWindow::currentPage()
@@ -1232,6 +1489,7 @@ void MainWindow::onAddTextComponent()
     Component component;
     component.eType = E_COMPONENT_TYPE_TEXT;
     component.textData.strContent = strContent;
+    component.textData.color = ThemeManager::currentTheme().textColor;
     component.size = QSizeF(300, 60);
     ComponentItem* pNewItem = m_pScene->addComponent(component);
     if (pNewItem) {
@@ -1250,6 +1508,8 @@ void MainWindow::onAddShapeComponent(int nIndex)
     Component component;
     component.eType = E_COMPONENT_TYPE_SHAPE;
     component.shapeData.eShapeType = static_cast<E_SHAPE_TYPE>(nIndex);
+    component.shapeData.fillColor = ThemeManager::currentTheme().secondaryColor;
+    component.shapeData.borderColor = ThemeManager::currentTheme().primaryColor;
     component.size = QSizeF(200, 120);
     ComponentItem* pNewItem = m_pScene->addComponent(component);
     if (pNewItem) {
@@ -1503,11 +1763,14 @@ void MainWindow::onCanvasContextMenu(const QPointF& rScenePos)
     QAction* pLockAction = nullptr;
     if (pHitItem) {
         const E_COMPONENT_TYPE eType = pHitItem->component().eType;
-        if (eType == E_COMPONENT_TYPE_TEXT || eType == E_COMPONENT_TYPE_TABLE) {
+        if (eType == E_COMPONENT_TYPE_TEXT || eType == E_COMPONENT_TYPE_TABLE
+            || eType == E_COMPONENT_TYPE_STICKER) {
             menu.addSeparator();
             pEditTextAction = menu.addAction(eType == E_COMPONENT_TYPE_TEXT
                                                  ? QStringLiteral("编辑文本…")
-                                                 : QStringLiteral("编辑表格…"));
+                                                 : eType == E_COMPONENT_TYPE_TABLE
+                                                     ? QStringLiteral("编辑表格…")
+                                                     : QStringLiteral("编辑贴纸…"));
         }
         menu.addSeparator();
         pLockAction = menu.addAction(pHitItem->component().bLocked

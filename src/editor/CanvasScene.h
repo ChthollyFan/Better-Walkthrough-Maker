@@ -25,6 +25,9 @@ public:
     void loadPage(const Page& rPage);
     // 清空场景与组件列表（无页面/切换页面时使用，避免悬空指针）
     void clearPage();
+    // 页面背景色（跟随主题）
+    void setPageBackgroundColor(const QColor& rColor);
+    QColor pageBackgroundColor() const { return m_pageBackgroundColor; }
     // 将场景内全部组件写回页面模型（按 zOrder 排序）
     void syncToModel(Page* pPage);
     // 新增一个组件（自动分配 id 与 zOrder），返回创建的图元
@@ -66,6 +69,7 @@ private:
     bool m_bSnapToGrid = true;            // 网格吸附开关
     bool m_bSnapToGuides = true;          // 对齐参考线吸附开关
     int m_nGridSize = 10;                 // 网格间距（逻辑像素）
+    QColor m_pageBackgroundColor = Qt::white;   // 页面背景色（跟随主题）
 };
 
 } // namespace bwm

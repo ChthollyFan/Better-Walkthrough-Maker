@@ -5,6 +5,7 @@ set(TEST_SOURCES
   core/test_project_serialization.cpp
   core/test_project_manager.cpp
   export/test_export_renderer.cpp
+  template/test_template.cpp
 )
 
 foreach(test_source IN LISTS TEST_SOURCES)

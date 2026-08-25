@@ -57,6 +57,12 @@ private slots:
     void onAddPage();
     void onRenameNode();
     void onDeleteNode();
+    // 模板
+    void onSaveAsTemplate();
+    void onImportTemplate();
+    void onExportTemplate();
+    // 装饰贴纸
+    void onAddStickerComponent(int nIndex);
 
     // 插入组件
     void onAddImageComponent();
@@ -134,6 +140,8 @@ private:
     void setItemToTop(ComponentItem* pItem, bool bTop);
     // 右键菜单辅助
     ComponentItem* componentItemAt(const QPointF& rScenePos) const;
+    // 应用当前主题（画布背景色等）
+    void applyTheme();
     // 素材库：刷新缩略图列表
     void refreshAssetList();
 

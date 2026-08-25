@@ -68,6 +68,7 @@ private:
     void updateRotateByMouse(const QPointF& rScenePos);
     void editTextContent();
     void editTableContent();
+    void editStickerContent();
     qreal handleHitRadius() const;
 
     Component m_component;                    // 组件数据副本
