@@ -6,6 +6,8 @@
 #ifndef BWM_CORE_PROJECT_H
 #define BWM_CORE_PROJECT_H
 
+#include "core/Component.h"
+
 #include <QSize>
 #include <QString>
 #include <QVector>
@@ -27,10 +29,11 @@ enum E_WALKTHROUGH_TYPE {
 QString walkthroughTypeToString(E_WALKTHROUGH_TYPE eType);
 E_WALKTHROUGH_TYPE walkthroughTypeFromString(const QString& strText);
 
-// 页面：一页 = 一张导出的 PNG。组件列表在 M2 画布阶段加入，M1 仅保留名称与尺寸。
+// 页面：一页 = 一张导出的 PNG。组件列表在 M2 画布阶段使用。
 struct Page {
-    QString strName;    // 页面名
-    QSize size;         // 逻辑像素尺寸；导出时按倍率缩放
+    QString strName;                   // 页面名
+    QSize size;                        // 逻辑像素尺寸；导出时按倍率缩放
+    QVector<Component> vecComponents;  // 页面组件列表（M2 画布阶段加入）
 };
 
 // 攻略：项目下的一个攻略，绑定一个类型（对应模板分类）。

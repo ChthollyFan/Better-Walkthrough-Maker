@@ -26,6 +26,10 @@ private slots:
     void testFutureVersion();
     // 非法页面尺寸（零、负数、超上限）回退默认尺寸
     void testInvalidPageSize();
+    // 页面含组件时序列化往返一致
+    void testComponentRoundtrip();
+    // 旧格式（无 components 字段）读取为空组件列表
+    void testLegacyFormatWithoutComponents();
 };
 
 void TestProjectSerialization::testRoundtrip()
@@ -161,6 +165,97 @@ void TestProjectSerialization::testInvalidPageSize()
     for (const Page& rPage : rPages) {
         QCOMPARE(rPage.size, QSize(1080, 1440));
     }
+}
+
+void TestProjectSerialization::testComponentRoundtrip()
+{
+    // 构造一个含三种组件的页面
+    Component imageComponent;
+    imageComponent.strId = QStringLiteral("id-image-1");
+    imageComponent.eType = E_COMPONENT_TYPE_IMAGE;
+    imageComponent.pos = QPointF(10, 20);
+    imageComponent.size = QSizeF(300, 200);
+    imageComponent.dRotation = 15;
+    imageComponent.nZOrder = 2;
+    imageComponent.imageData.strFilePath = QStringLiteral("assets/截图.png");
+
+    Component textComponent;
+    textComponent.strId = QStringLiteral("id-text-1");
+    textComponent.eType = E_COMPONENT_TYPE_TEXT;
+    textComponent.pos = QPointF(50, 60);
+    textComponent.textData.strContent = QStringLiteral("出血流装备");
+    textComponent.textData.strFontFamily = QStringLiteral("Microsoft YaHei");
+    textComponent.textData.nFontSize = 32;
+    textComponent.textData.color = QColor(200, 30, 30);
+    textComponent.textData.bBold = true;
+
+    Component shapeComponent;
+    shapeComponent.strId = QStringLiteral("id-shape-1");
+    shapeComponent.eType = E_COMPONENT_TYPE_SHAPE;
+    shapeComponent.shapeData.eShapeType = E_SHAPE_TYPE_ROUND_RECT;
+    shapeComponent.shapeData.fillColor = QColor(240, 240, 240);
+    shapeComponent.shapeData.borderColor = QColor(100, 100, 100);
+    shapeComponent.shapeData.nBorderWidth = 2;
+    shapeComponent.bLocked = true;
+
+    Project project;
+    project.strName = QStringLiteral("组件测试");
+    Walkthrough walkthrough;
+    walkthrough.strTitle = QStringLiteral("攻略 1");
+    Page page;
+    page.strName = QStringLiteral("页面 1");
+    page.size = QSize(1080, 1440);
+    page.vecComponents = {imageComponent, textComponent, shapeComponent};
+    walkthrough.vecPages.append(page);
+    project.vecWalkthroughs.append(walkthrough);
+
+    const QString strJson = ProjectSerializer::toJson(project);
+
+    Project parsed;
+    QString strErrorMessage;
+    QVERIFY2(ProjectSerializer::fromJson(strJson, &parsed, &strErrorMessage), qPrintable(strErrorMessage));
+
+    const auto& rComponents = parsed.vecWalkthroughs.at(0).vecPages.at(0).vecComponents;
+    QCOMPARE(rComponents.size(), 3);
+
+    // 图片组件
+    QCOMPARE(rComponents.at(0).strId, QStringLiteral("id-image-1"));
+    QCOMPARE(rComponents.at(0).eType, E_COMPONENT_TYPE_IMAGE);
+    QCOMPARE(rComponents.at(0).pos, QPointF(10, 20));
+    QCOMPARE(rComponents.at(0).size, QSizeF(300, 200));
+    QCOMPARE(rComponents.at(0).dRotation, 15.0);
+    QCOMPARE(rComponents.at(0).nZOrder, 2);
+    QCOMPARE(rComponents.at(0).imageData.strFilePath, QStringLiteral("assets/截图.png"));
+
+    // 文本组件
+    QCOMPARE(rComponents.at(1).eType, E_COMPONENT_TYPE_TEXT);
+    QCOMPARE(rComponents.at(1).textData.strContent, QStringLiteral("出血流装备"));
+    QCOMPARE(rComponents.at(1).textData.nFontSize, 32);
+    QCOMPARE(rComponents.at(1).textData.color, QColor(200, 30, 30));
+    QVERIFY(rComponents.at(1).textData.bBold);
+
+    // 形状组件
+    QCOMPARE(rComponents.at(2).eType, E_COMPONENT_TYPE_SHAPE);
+    QCOMPARE(rComponents.at(2).shapeData.eShapeType, E_SHAPE_TYPE_ROUND_RECT);
+    QCOMPARE(rComponents.at(2).shapeData.fillColor, QColor(240, 240, 240));
+    QCOMPARE(rComponents.at(2).shapeData.nBorderWidth, 2);
+    QVERIFY(rComponents.at(2).bLocked);
+}
+
+void TestProjectSerialization::testLegacyFormatWithoutComponents()
+{
+    // M1 旧格式：页面无 components 字段
+    const QString strJson = QStringLiteral(R"({
+        "formatVersion": 1,
+        "name": "旧项目",
+        "walkthroughs": [ { "title": "旧攻略", "type": "cover",
+            "pages": [ { "name": "旧页面", "width": 1080, "height": 1440 } ] } ]
+    })");
+    Project parsed;
+    QString strErrorMessage;
+    QVERIFY2(ProjectSerializer::fromJson(strJson, &parsed, &strErrorMessage), qPrintable(strErrorMessage));
+    QCOMPARE(parsed.vecWalkthroughs.at(0).vecPages.at(0).strName, QStringLiteral("旧页面"));
+    QVERIFY(parsed.vecWalkthroughs.at(0).vecPages.at(0).vecComponents.isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestProjectSerialization)

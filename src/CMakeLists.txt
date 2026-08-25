@@ -1,5 +1,6 @@
 # 核心库：数据模型、序列化、项目管理、设置（主程序与单元测试共用）
 add_library(bwm_core STATIC
+  core/Component.cpp
   core/Project.cpp
   core/ProjectSerializer.cpp
   project/ProjectManager.cpp
@@ -12,6 +13,9 @@ target_link_libraries(bwm_core PUBLIC Qt6::Widgets)
 add_executable(bwm
   app/main.cpp
   app/MainWindow.cpp
+  editor/CanvasScene.cpp
+  editor/CanvasView.cpp
+  editor/ComponentItem.cpp
 )
 
 target_link_libraries(bwm PRIVATE bwm_core)

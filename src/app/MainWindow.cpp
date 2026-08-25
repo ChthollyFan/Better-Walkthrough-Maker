@@ -1,49 +1,75 @@
 /**
  * @file MainWindow.cpp
  * @author zhangweimu
- * @brief 主窗口实现。
+ * @brief 主窗口实现（M2a：画布编辑 + 图层面板）。
  */
 #include "app/MainWindow.h"
 
 #include "core/Project.h"
+#include "editor/CanvasScene.h"
+#include "editor/CanvasView.h"
+#include "editor/ComponentItem.h"
 #include "project/ProjectManager.h"
 #include "settings/Settings.h"
 
 #include <QAction>
 #include <QApplication>
-#include <QBrush>
-#include <QColor>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
-#include <QGraphicsRectItem>
 #include <QGraphicsScene>
-#include <QGraphicsSimpleTextItem>
 #include <QGraphicsView>
+#include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPair>
-#include <QPen>
 #include <QPushButton>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QToolBar>
 #include <QTreeWidget>
+#include <QVBoxLayout>
+#include <QWidget>
 
 namespace bwm {
+
+namespace {
+
+// 图层列表项中保存 ComponentItem* 的 UserRole
+constexpr int nComponentItemRole = Qt::UserRole + 1;
+
+// 组件类型的显示名称
+QString componentDisplayName(const Component& rComponent)
+{
+    switch (rComponent.eType) {
+    case E_COMPONENT_TYPE_IMAGE:
+        return QStringLiteral("图片");
+    case E_COMPONENT_TYPE_TEXT:
+        return rComponent.textData.strContent.left(12);
+    case E_COMPONENT_TYPE_SHAPE:
+    default:
+        return QStringLiteral("形状");
+    }
+}
+
+} // namespace
 
 MainWindow::MainWindow(QWidget* pParent)
     : QMainWindow(pParent)
     , m_pProjectManager(new ProjectManager(this))
-    , m_pScene(new QGraphicsScene(this))
+    , m_pScene(new CanvasScene(this))
 {
     setWindowTitle(QStringLiteral("更好的攻略制作器"));
-    resize(1200, 800);
+    resize(1400, 900);
 
     createMenus();
+    createToolBar();
     createCentralWidget();
     createStatusBar();
 
@@ -51,6 +77,10 @@ MainWindow::MainWindow(QWidget* pParent)
             this, &MainWindow::onProjectOpened);
     connect(m_pProjectManager, &ProjectManager::autoSavePerformed,
             this, &MainWindow::onAutoSavePerformed);
+    connect(m_pScene, &CanvasScene::componentsChanged,
+            this, &MainWindow::onCanvasComponentsChanged);
+    connect(m_pScene, &QGraphicsScene::selectionChanged,
+            this, &MainWindow::onCanvasSelectionChanged);
 }
 
 MainWindow::~MainWindow() = default;
@@ -86,26 +116,119 @@ void MainWindow::createMenus()
     QAction* pExitAction = pFileMenu->addAction(QStringLiteral("退出(&X)"));
     pExitAction->setShortcut(QKeySequence::Quit);
     connect(pExitAction, &QAction::triggered, this, &QWidget::close);
+
+    // 插入菜单
+    QMenu* pInsertMenu = menuBar()->addMenu(QStringLiteral("插入(&I)"));
+
+    QAction* pAddImageAction = pInsertMenu->addAction(QStringLiteral("图片(&P)…"));
+    connect(pAddImageAction, &QAction::triggered, this, &MainWindow::onAddImageComponent);
+
+    QAction* pAddTextAction = pInsertMenu->addAction(QStringLiteral("文本(&T)…"));
+    connect(pAddTextAction, &QAction::triggered, this, &MainWindow::onAddTextComponent);
+
+    QMenu* pShapeMenu = pInsertMenu->addMenu(QStringLiteral("形状(&S)"));
+    QAction* pAddRectAction = pShapeMenu->addAction(QStringLiteral("矩形"));
+    pAddRectAction->setData(static_cast<int>(E_SHAPE_TYPE_RECTANGLE));
+    connect(pAddRectAction, &QAction::triggered, this, [this]() {
+        onAddShapeComponent(static_cast<int>(E_SHAPE_TYPE_RECTANGLE));
+    });
+    QAction* pAddRoundRectAction = pShapeMenu->addAction(QStringLiteral("圆角矩形"));
+    pAddRoundRectAction->setData(static_cast<int>(E_SHAPE_TYPE_ROUND_RECT));
+    connect(pAddRoundRectAction, &QAction::triggered, this, [this]() {
+        onAddShapeComponent(static_cast<int>(E_SHAPE_TYPE_ROUND_RECT));
+    });
+    QAction* pAddEllipseAction = pShapeMenu->addAction(QStringLiteral("椭圆"));
+    pAddEllipseAction->setData(static_cast<int>(E_SHAPE_TYPE_ELLIPSE));
+    connect(pAddEllipseAction, &QAction::triggered, this, [this]() {
+        onAddShapeComponent(static_cast<int>(E_SHAPE_TYPE_ELLIPSE));
+    });
+    QAction* pAddLineAction = pShapeMenu->addAction(QStringLiteral("线条"));
+    pAddLineAction->setData(static_cast<int>(E_SHAPE_TYPE_LINE));
+    connect(pAddLineAction, &QAction::triggered, this, [this]() {
+        onAddShapeComponent(static_cast<int>(E_SHAPE_TYPE_LINE));
+    });
+
+    // 编辑菜单
+    QMenu* pEditMenu = menuBar()->addMenu(QStringLiteral("编辑(&E)"));
+
+    QAction* pDeleteAction = pEditMenu->addAction(QStringLiteral("删除选中(&D)"));
+    pDeleteAction->setShortcut(QKeySequence::Delete);
+    connect(pDeleteAction, &QAction::triggered, this, &MainWindow::onDeleteSelected);
+
+    QAction* pSelectAllAction = pEditMenu->addAction(QStringLiteral("全选(&A)"));
+    pSelectAllAction->setShortcut(QKeySequence::SelectAll);
+    connect(pSelectAllAction, &QAction::triggered, this, &MainWindow::onSelectAllComponents);
+}
+
+void MainWindow::createToolBar()
+{
+    m_pToolBar = addToolBar(QStringLiteral("插入"));
+
+    QAction* pAddImageAction = m_pToolBar->addAction(QStringLiteral("插入图片"));
+    connect(pAddImageAction, &QAction::triggered, this, &MainWindow::onAddImageComponent);
+
+    QAction* pAddTextAction = m_pToolBar->addAction(QStringLiteral("插入文本"));
+    connect(pAddTextAction, &QAction::triggered, this, &MainWindow::onAddTextComponent);
+
+    auto* pShapeCombo = new QComboBox(m_pToolBar);
+    pShapeCombo->addItem(QStringLiteral("矩形"), static_cast<int>(E_SHAPE_TYPE_RECTANGLE));
+    pShapeCombo->addItem(QStringLiteral("圆角矩形"), static_cast<int>(E_SHAPE_TYPE_ROUND_RECT));
+    pShapeCombo->addItem(QStringLiteral("椭圆"), static_cast<int>(E_SHAPE_TYPE_ELLIPSE));
+    pShapeCombo->addItem(QStringLiteral("线条"), static_cast<int>(E_SHAPE_TYPE_LINE));
+    m_pToolBar->addWidget(pShapeCombo);
+    QAction* pAddShapeAction = m_pToolBar->addAction(QStringLiteral("插入形状"));
+    connect(pAddShapeAction, &QAction::triggered, this, [this, pShapeCombo]() {
+        onAddShapeComponent(pShapeCombo->currentData().toInt());
+    });
+
+    m_pToolBar->addSeparator();
+    QAction* pDeleteAction = m_pToolBar->addAction(QStringLiteral("删除选中"));
+    connect(pDeleteAction, &QAction::triggered, this, &MainWindow::onDeleteSelected);
 }
 
 void MainWindow::createCentralWidget()
 {
     m_pProjectTree = new QTreeWidget(this);
     m_pProjectTree->setHeaderLabel(QStringLiteral("项目结构"));
-    m_pProjectTree->setMinimumWidth(220);
+    m_pProjectTree->setMinimumWidth(200);
     connect(m_pProjectTree, &QTreeWidget::itemSelectionChanged,
             this, &MainWindow::onProjectTreeSelectionChanged);
 
-    m_pView = new QGraphicsView(m_pScene, this);
-    m_pView->setRenderHint(QPainter::Antialiasing);
-    m_pView->setBackgroundBrush(QColor(60, 60, 60));
-    m_pView->setDragMode(QGraphicsView::RubberBandDrag);
+    m_pView = new CanvasView(m_pScene, this);
+
+    // 图层面板：列表 + 操作按钮
+    auto* pLayerPanel = new QWidget(this);
+    auto* pLayerLayout = new QVBoxLayout(pLayerPanel);
+    pLayerLayout->setContentsMargins(0, 0, 0, 0);
+    m_pLayerList = new QListWidget(pLayerPanel);
+    m_pLayerList->setMinimumWidth(180);
+    connect(m_pLayerList, &QListWidget::itemSelectionChanged,
+            this, &MainWindow::onLayerSelectionChanged);
+    connect(m_pLayerList, &QListWidget::itemChanged,
+            this, &MainWindow::onLayerVisibilityChanged);
+    pLayerLayout->addWidget(m_pLayerList);
+
+    auto* pLayerButtons = new QHBoxLayout;
+    QPushButton* pMoveUpButton = new QPushButton(QStringLiteral("上移"), pLayerPanel);
+    QPushButton* pMoveDownButton = new QPushButton(QStringLiteral("下移"), pLayerPanel);
+    QPushButton* pToTopButton = new QPushButton(QStringLiteral("置顶"), pLayerPanel);
+    QPushButton* pToBottomButton = new QPushButton(QStringLiteral("置底"), pLayerPanel);
+    connect(pMoveUpButton, &QPushButton::clicked, this, &MainWindow::onLayerMoveUp);
+    connect(pMoveDownButton, &QPushButton::clicked, this, &MainWindow::onLayerMoveDown);
+    connect(pToTopButton, &QPushButton::clicked, this, &MainWindow::onLayerToTop);
+    connect(pToBottomButton, &QPushButton::clicked, this, &MainWindow::onLayerToBottom);
+    pLayerButtons->addWidget(pMoveUpButton);
+    pLayerButtons->addWidget(pMoveDownButton);
+    pLayerButtons->addWidget(pToTopButton);
+    pLayerButtons->addWidget(pToBottomButton);
+    pLayerLayout->addLayout(pLayerButtons);
 
     QSplitter* pSplitter = new QSplitter(Qt::Horizontal, this);
     pSplitter->addWidget(m_pProjectTree);
     pSplitter->addWidget(m_pView);
+    pSplitter->addWidget(pLayerPanel);
     pSplitter->setStretchFactor(1, 1);
-    pSplitter->setSizes({260, 940});
+    pSplitter->setSizes({220, 900, 220});
 
     setCentralWidget(pSplitter);
 }
@@ -201,6 +324,8 @@ void MainWindow::onSaveProject()
         statusBar()->showMessage(QStringLiteral("当前没有打开的项目"), 3000);
         return;
     }
+    // 保存前先同步画布到模型，保证未触发自动保存的编辑也落盘
+    syncCanvasToModel();
     QString strErrorMessage;
     if (m_pProjectManager->save(&strErrorMessage)) {
         statusBar()->showMessage(QStringLiteral("已保存"), 3000);
@@ -292,47 +417,275 @@ QString MainWindow::selectedPageKey() const
         return QString();
     }
     const QString strKey = m_mapNodeKeys.value(selected.first());
-    // 仅页面节点（含冒号）才驱动画布占位
+    // 仅页面节点（含冒号）才驱动画布
     return strKey.contains(QLatin1Char(':')) ? strKey : QString();
 }
 
-void MainWindow::updateCanvasPlaceholder()
+Page* MainWindow::currentPage()
 {
-    m_pScene->clear();
-
     const QString strPageKey = selectedPageKey();
     if (strPageKey.isEmpty()) {
-        return;
+        return nullptr;
     }
-
     const QStringList parts = strPageKey.split(QLatin1Char(':'));
     const int nWalkthroughIndex = parts.at(0).toInt();
     const int nPageIndex = parts.at(1).toInt();
-    const Project* pProject = m_pProjectManager->project();
+    Project* pProject = m_pProjectManager->project();
     if (!pProject || nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
-        return;
+        return nullptr;
     }
-    const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+    Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
     if (nPageIndex < 0 || nPageIndex >= rWalkthrough.vecPages.size()) {
+        return nullptr;
+    }
+    return &rWalkthrough.vecPages[nPageIndex];
+}
+
+void MainWindow::updateCanvasEditor()
+{
+    Page* pPage = currentPage();
+    if (!pPage) {
+        m_pScene->clear();
         return;
     }
-    const Page& rPage = rWalkthrough.vecPages.at(nPageIndex);
-
-    // 最小画布占位：白底页面 + 灰色边框 + 页面名。
-    // 这同时验证"场景渲染 = 导出渲染"管线的可行性（M4 用同一场景导出）。
-    m_pScene->setSceneRect(0, 0, rPage.size.width(), rPage.size.height());
-    m_pScene->addRect(0, 0, rPage.size.width(), rPage.size.height(),
-                      QPen(QColor(140, 140, 140)), QBrush(Qt::white));
-    auto* pNameText = m_pScene->addSimpleText(rPage.strName);
-    pNameText->setBrush(QColor(180, 180, 180));
-    pNameText->setPos(8, 8);
-
+    m_bSyncingCanvas = true;
+    m_pScene->loadPage(*pPage);
+    m_bSyncingCanvas = false;
     m_pView->fitInView(m_pScene->sceneRect(), Qt::KeepAspectRatio);
+    refreshLayerList();
+}
+
+void MainWindow::syncCanvasToModel()
+{
+    if (m_bSyncingCanvas) {
+        return;
+    }
+    Page* pPage = currentPage();
+    if (pPage) {
+        m_pScene->syncToModel(pPage);
+        m_pProjectManager->setDirty();
+        updateWindowTitle();
+    }
+}
+
+void MainWindow::onCanvasComponentsChanged()
+{
+    syncCanvasToModel();
+    refreshLayerList();
+}
+
+void MainWindow::onCanvasSelectionChanged()
+{
+    // 场景选中变化 → 同步图层面板选中行（guard 防回环）
+    if (m_bSyncingCanvas) {
+        return;
+    }
+    m_bSyncingCanvas = true;
+    const QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
+    for (int nRow = 0; nRow < m_pLayerList->count(); ++nRow) {
+        QListWidgetItem* pListItem = m_pLayerList->item(nRow);
+        auto* pItem = static_cast<ComponentItem*>(pListItem->data(nComponentItemRole).value<void*>());
+        pListItem->setSelected(vecSelected.contains(pItem));
+    }
+    m_bSyncingCanvas = false;
+}
+
+void MainWindow::refreshLayerList()
+{
+    m_bSyncingCanvas = true;
+    m_pLayerList->blockSignals(true);
+    m_pLayerList->clear();
+    const QVector<ComponentItem*> vecItems = m_pScene->componentItems();
+    // 列表行 0 在最底层（zOrder 最小），最后一行在最顶层
+    for (const ComponentItem* pItem : vecItems) {
+        const Component& rComponent = pItem->component();
+        auto* pListItem = new QListWidgetItem(componentDisplayName(rComponent));
+        pListItem->setFlags(pListItem->flags() | Qt::ItemIsUserCheckable);
+        pListItem->setCheckState(rComponent.bVisible ? Qt::Checked : Qt::Unchecked);
+        pListItem->setData(nComponentItemRole, QVariant::fromValue(static_cast<void*>(
+            const_cast<ComponentItem*>(pItem))));
+        m_pLayerList->addItem(pListItem);
+    }
+    m_pLayerList->blockSignals(false);
+    m_bSyncingCanvas = false;
+}
+
+void MainWindow::onAddImageComponent()
+{
+    const QString strFilePath = QFileDialog::getOpenFileName(
+        this, QStringLiteral("选择图片"), QString(),
+        QStringLiteral("图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)"));
+    if (strFilePath.isEmpty()) {
+        return;
+    }
+    Component component;
+    component.eType = E_COMPONENT_TYPE_IMAGE;
+    component.imageData.strFilePath = strFilePath;
+    component.size = QSizeF(300, 200);
+    ComponentItem* pNewItem = m_pScene->addComponent(component);
+    if (pNewItem) {
+        m_pScene->clearSelection();
+        pNewItem->setSelected(true);
+        m_pView->centerOn(pNewItem);
+    }
+}
+
+void MainWindow::onAddTextComponent()
+{
+    bool bOk = false;
+    const QString strContent = QInputDialog::getText(
+        this, QStringLiteral("插入文本"), QStringLiteral("文本内容："),
+        QLineEdit::Normal, QStringLiteral("攻略文本"), &bOk);
+    if (!bOk) {
+        return;
+    }
+    Component component;
+    component.eType = E_COMPONENT_TYPE_TEXT;
+    component.textData.strContent = strContent;
+    component.size = QSizeF(300, 60);
+    ComponentItem* pNewItem = m_pScene->addComponent(component);
+    if (pNewItem) {
+        m_pScene->clearSelection();
+        pNewItem->setSelected(true);
+        m_pView->centerOn(pNewItem);
+    }
+}
+
+void MainWindow::onAddShapeComponent(int nIndex)
+{
+    Component component;
+    component.eType = E_COMPONENT_TYPE_SHAPE;
+    component.shapeData.eShapeType = static_cast<E_SHAPE_TYPE>(nIndex);
+    component.size = QSizeF(200, 120);
+    ComponentItem* pNewItem = m_pScene->addComponent(component);
+    if (pNewItem) {
+        m_pScene->clearSelection();
+        pNewItem->setSelected(true);
+        m_pView->centerOn(pNewItem);
+    }
+}
+
+void MainWindow::onDeleteSelected()
+{
+    m_pScene->removeSelectedComponents();
+}
+
+void MainWindow::onSelectAllComponents()
+{
+    for (ComponentItem* pItem : m_pScene->componentItems()) {
+        pItem->setSelected(true);
+    }
+}
+
+void MainWindow::moveLayer(int nOffset)
+{
+    const QList<QListWidgetItem*> selected = m_pLayerList->selectedItems();
+    if (selected.isEmpty()) {
+        return;
+    }
+    const int nRow = m_pLayerList->row(selected.first());
+    const int nTarget = nRow + nOffset;
+    if (nTarget < 0 || nTarget >= m_pLayerList->count()) {
+        return;
+    }
+    moveLayerTo(nTarget);
+}
+
+void MainWindow::moveLayerTo(int nTargetIndex)
+{
+    const QList<QListWidgetItem*> selected = m_pLayerList->selectedItems();
+    if (selected.isEmpty() || m_pLayerList->count() < 2) {
+        return;
+    }
+    const int nSourceIndex = m_pLayerList->row(selected.first());
+    if (nSourceIndex == nTargetIndex) {
+        return;
+    }
+
+    auto* pSourceItem = static_cast<ComponentItem*>(
+        m_pLayerList->item(nSourceIndex)->data(nComponentItemRole).value<void*>());
+    auto* pTargetItem = static_cast<ComponentItem*>(
+        m_pLayerList->item(nTargetIndex)->data(nComponentItemRole).value<void*>());
+
+    // 交换 zOrder 后刷新场景层级
+    Component sourceComponent = pSourceItem->component();
+    Component targetComponent = pTargetItem->component();
+    const int nTemp = sourceComponent.nZOrder;
+    sourceComponent.nZOrder = targetComponent.nZOrder;
+    targetComponent.nZOrder = nTemp;
+    pSourceItem->setComponent(sourceComponent);
+    pTargetItem->setComponent(targetComponent);
+
+    m_pScene->sortByZOrder();
+    refreshLayerList();
+    // 保持选中
+    for (int nRow = 0; nRow < m_pLayerList->count(); ++nRow) {
+        if (m_pLayerList->item(nRow)->data(nComponentItemRole).value<void*>() == pSourceItem) {
+            m_pLayerList->setCurrentRow(nRow);
+            break;
+        }
+    }
+    syncCanvasToModel();
+}
+
+void MainWindow::onLayerMoveUp()
+{
+    moveLayer(1);   // 行号增大 = 更上层
+}
+
+void MainWindow::onLayerMoveDown()
+{
+    moveLayer(-1);  // 行号减小 = 更下层
+}
+
+void MainWindow::onLayerToTop()
+{
+    moveLayerTo(m_pLayerList->count() - 1);
+}
+
+void MainWindow::onLayerToBottom()
+{
+    moveLayerTo(0);
+}
+
+void MainWindow::onLayerSelectionChanged()
+{
+    if (m_bSyncingCanvas) {
+        return;
+    }
+    const QList<QListWidgetItem*> selected = m_pLayerList->selectedItems();
+    if (selected.isEmpty()) {
+        return;
+    }
+    auto* pItem = static_cast<ComponentItem*>(selected.first()->data(nComponentItemRole).value<void*>());
+    if (pItem) {
+        m_bSyncingCanvas = true;
+        m_pScene->clearSelection();
+        pItem->setSelected(true);
+        m_bSyncingCanvas = false;
+        m_pView->centerOn(pItem);
+    }
+}
+
+void MainWindow::onLayerVisibilityChanged(QListWidgetItem* pListItem)
+{
+    if (m_bSyncingCanvas) {
+        return;
+    }
+    auto* pItem = static_cast<ComponentItem*>(pListItem->data(nComponentItemRole).value<void*>());
+    if (!pItem) {
+        return;
+    }
+    Component component = pItem->component();
+    component.bVisible = (pListItem->checkState() == Qt::Checked);
+    pItem->setComponent(component);
+    pItem->setVisible(component.bVisible);
+    syncCanvasToModel();
 }
 
 void MainWindow::onProjectTreeSelectionChanged()
 {
-    updateCanvasPlaceholder();
+    updateCanvasEditor();
 }
 
 void MainWindow::updateWindowTitle()
