@@ -729,6 +729,12 @@ void MainWindow::onExportPng()
     pModeLayout->addWidget(pSeparatorCheck);
     pFormLayout->addRow(pModeGroup);
 
+    // 范围选"当前页"时形态无意义（一页长图与单页相同），冻结形态选择；选"全部页"时启用
+    pModeGroup->setEnabled(false);
+    connect(pRadioCurrentPage, &QRadioButton::toggled, pModeGroup, [pModeGroup](bool bCurrentPage) {
+        pModeGroup->setEnabled(!bCurrentPage);
+    });
+
     // 倍率
     auto* pScaleCombo = new QComboBox(&dialog);
     pScaleCombo->addItem(QStringLiteral("1x（原尺寸）"), 1.0);
