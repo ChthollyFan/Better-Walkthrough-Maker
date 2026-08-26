@@ -8,6 +8,8 @@ on:
   push:
     tags:
       - 'v*'
+  # 允许在 Actions 页面手动触发（调试/重跑无需删建 tag）
+  workflow_dispatch:
 
 jobs:
   build:
