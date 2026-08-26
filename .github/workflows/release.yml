@@ -21,11 +21,13 @@ jobs:
       - name: Install Qt + MinGW toolchain (msvcrt, matches local build)
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.11.2'
+          # 使用 aqt 可正常安装的 6.8 LTS：aqt 3.3.0 不识别 Qt 6.11+ 的
+          # 新目录结构（qt6_XXXX_mingw/），6.8 为旧结构，安装稳定。
+          version: '6.8.3'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_mingw'
-          tools: 'tools_mingw1310'
+          tools: 'tools_mingw1120'
 
       - name: Locate MinGW g++ and add to PATH
         run: |
