@@ -1,0 +1,65 @@
+# 自动发布：推送 v* 标签时构建并发布绿色版 zip 到 GitHub Releases
+# 用法：git tag v0.1.0 && git push origin v0.1.0
+# 说明：此工作流在 Windows 官方 runner 上安装 MinGW 与 Qt（MinGW 版），
+#       与本地构建环境保持一致，避免 MSVC 差异。
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MinGW
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
+
+      - name: Install Qt (MinGW)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.2'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_mingw'
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          "-DCMAKE_PREFIX_PATH=$env:Qt6_DIR"
+          "-DQt6_DIR=$env:Qt6_DIR/lib/cmake/Qt6"
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=g++
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Deploy runtime (windeployqt)
+        run: |
+          $windeployqt = Join-Path $env:Qt6_DIR 'bin/windeployqt.exe'
+          & $windeployqt --release --compiler-runtime build/src/bwm.exe
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $distDir = "dist/BetterWalkthroughMaker-$tag-win64"
+          New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+          Copy-Item build/src/* $distDir -Recurse -Force
+          Copy-Item README.md $distDir -Force
+          Compress-Archive -Path $distDir -DestinationPath "dist/BetterWalkthroughMaker-$tag-win64.zip" -Force
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true

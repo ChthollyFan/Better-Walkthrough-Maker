@@ -19,6 +19,14 @@
 |---|---|---|---|
 | ![主界面](docs/screenshots/main-window.png) | ![画布编辑](docs/screenshots/canvas-editing.png) | ![模板选择](docs/screenshots/template-picker.png) | ![导出对话框](docs/screenshots/export-dialog.png) |
 
+## 下载与发布
+
+[![GitHub Release](https://img.shields.io/github/v/release/ChthollyFan/Better-Walkthrough-Maker)](https://github.com/ChthollyFan/Better-Walkthrough-Maker/releases)
+
+- **绿色版 zip**：从 [Releases](https://github.com/ChthollyFan/Better-Walkthrough-Maker/releases) 下载，解压后直接运行 `BetterWalkthroughMaker.exe`（无需安装 Qt）
+- **本地打包**：`powershell -ExecutionPolicy Bypass -File .\deploy.ps1`（生成 `dist/` 下绿色版 zip）
+- **自动发布**：打标签 `git tag v0.1.0 && git push origin v0.1.0`，GitHub Actions 自动构建（装 Qt → 编译 → 测试 → 打包）并发布到 Releases
+
 ## 文档
 
 - [项目规划](docs/project-plan.md) — 产品定位、数据模型、功能模块、技术架构、里程碑与实现记录
