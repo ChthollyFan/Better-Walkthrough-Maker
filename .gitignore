@@ -1,6 +1,9 @@
 # 构建产物
 build/
 
+# 发布产物
+dist/
+
 # 工具日志
 aqtinstall.log
 
