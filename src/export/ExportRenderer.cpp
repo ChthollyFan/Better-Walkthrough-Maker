@@ -49,9 +49,28 @@ void paintPageComponents(QPainter* pPainter, const Page& rPage, qreal dOffsetY)
     }
 }
 
+// 在图片右下角绘制作者署名（半透明）
+void drawAuthorMark(QImage& rImage, const QString& rAuthor, qreal dScale)
+{
+    if (rAuthor.trimmed().isEmpty() || rImage.isNull()) {
+        return;
+    }
+    QPainter painter(&rImage);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QFont font(QStringLiteral("Microsoft YaHei"));
+    font.setPixelSize(qMax(12, qRound(18 * dScale)));
+    painter.setFont(font);
+    painter.setPen(QColor(0, 0, 0, 160));
+    const QRectF textRect = QRectF(QPointF(0, 0), QSizeF(rImage.size()))
+                                .adjusted(0, 0, -16 * dScale, -10 * dScale);
+    painter.drawText(textRect, Qt::AlignRight | Qt::AlignBottom,
+                     QStringLiteral("by %1").arg(rAuthor));
+}
+
 } // namespace
 
-QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor& rBackground)
+QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor& rBackground,
+                                  const QString& rAuthor)
 {
     const int nWidth = qMax(1, qRound(rPage.size.width() * dScale));
     const int nHeight = qMax(1, qRound(rPage.size.height() * dScale));
@@ -63,11 +82,15 @@ QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor&
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
     painter.scale(dScale, dScale);
     paintPageComponents(&painter, rPage, 0);
+    painter.end();
+
+    drawAuthorMark(image, rAuthor, dScale);
     return image;
 }
 
 QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale, bool bSeparator,
-                                       QString* pErrorMessage, const QColor& rBackground)
+                                       QString* pErrorMessage, const QColor& rBackground,
+                                       const QString& rAuthor)
 {
     if (rPages.isEmpty()) {
         return QImage();
@@ -113,6 +136,9 @@ QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale
             dOffsetY += nSeparatorHeight;
         }
     }
+    painter.end();
+
+    drawAuthorMark(image, rAuthor, dScale);
     return image;
 }
 

@@ -47,6 +47,9 @@ private slots:
     void onSaveProject();
     void onExportPng();
     void onCopyPageToClipboard();
+    void onShowSettings();
+    void onShowShortcuts();
+    void onShowAbout();
     void onToggleAutoSave(bool bEnabled);
     void onProjectTreeSelectionChanged();
     void onProjectOpened();

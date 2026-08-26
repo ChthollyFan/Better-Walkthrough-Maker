@@ -24,6 +24,7 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QCursor>
 #include <QDesktopServices>
 #include <QDialog>
@@ -53,6 +54,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QRegularExpression>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -160,6 +162,12 @@ MainWindow::MainWindow(QWidget* pParent)
     setWindowTitle(QStringLiteral("更好的攻略制作器"));
     resize(1400, 900);
 
+    // 恢复上次窗口位置与大小
+    const QByteArray geometry = Settings::windowGeometry();
+    if (!geometry.isEmpty()) {
+        restoreGeometry(geometry);
+    }
+
     m_pUndoStack = new QUndoStack(this);
 
     createMenus();
@@ -216,6 +224,12 @@ void MainWindow::createMenus()
     QAction* pExportAction = pFileMenu->addAction(QStringLiteral("导出 PNG(&E)…"));
     pExportAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
     connect(pExportAction, &QAction::triggered, this, &MainWindow::onExportPng);
+
+    pFileMenu->addSeparator();
+
+    QAction* pSettingsAction = pFileMenu->addAction(QStringLiteral("设置(&T)…"));
+    pSettingsAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+,")));
+    connect(pSettingsAction, &QAction::triggered, this, &MainWindow::onShowSettings);
 
     pFileMenu->addSeparator();
 
@@ -395,6 +409,13 @@ void MainWindow::createMenus()
         ThemeManager::setCurrentThemeName(pAction->data().toString());
         applyTheme();
     });
+
+    // 帮助菜单
+    QMenu* pHelpMenu = menuBar()->addMenu(QStringLiteral("帮助(&H)"));
+    QAction* pShortcutsAction = pHelpMenu->addAction(QStringLiteral("快捷键(&K)…"));
+    connect(pShortcutsAction, &QAction::triggered, this, &MainWindow::onShowShortcuts);
+    QAction* pAboutAction = pHelpMenu->addAction(QStringLiteral("关于(&A)…"));
+    connect(pAboutAction, &QAction::triggered, this, &MainWindow::onShowAbout);
 }
 
 void MainWindow::createToolBar()
@@ -632,6 +653,9 @@ void MainWindow::onSaveProject()
 
 void MainWindow::closeEvent(QCloseEvent* pEvent)
 {
+    // 记住窗口状态（无论是否关闭成功）
+    Settings::setWindowGeometry(saveGeometry());
+
     if (m_pProjectManager->hasProject() && m_pProjectManager->isDirty()) {
         QMessageBox box(this);
         box.setWindowTitle(QStringLiteral("未保存的更改"));
@@ -713,6 +737,18 @@ void MainWindow::onExportPng()
     pScaleCombo->setCurrentIndex(1);
     pFormLayout->addRow(QStringLiteral("分辨率倍率："), pScaleCombo);
 
+    // 作者署名选项
+    auto* pAuthorCheck = new QCheckBox(&dialog);
+    const QString strAuthorName = Settings::authorName();
+    if (strAuthorName.trimmed().isEmpty()) {
+        pAuthorCheck->setText(QStringLiteral("添加作者署名（请先在 文件→设置 中填写）"));
+        pAuthorCheck->setEnabled(false);
+    } else {
+        pAuthorCheck->setText(QStringLiteral("添加作者署名（by %1）").arg(strAuthorName));
+        pAuthorCheck->setChecked(true);
+    }
+    pFormLayout->addRow(pAuthorCheck);
+
     // 导出目录
     auto* pDirEdit = new QLineEdit(&dialog);
     pDirEdit->setPlaceholderText(QStringLiteral("选择导出目录…"));
@@ -787,11 +823,13 @@ void MainWindow::onExportPng()
     const bool bLongImage = pRadioLong->isChecked();
     const bool bSeparator = pSeparatorCheck->isChecked();
     const QString strDirPath = QDir::cleanPath(strExportDir);
+    const QString strAuthor = pAuthorCheck->isChecked() ? Settings::authorName() : QString();
 
     if (bLongImage) {
         QString strErrorMessage;
         const QImage image = ExportRenderer::renderLongImage(
-            vecPages, dScale, bSeparator, &strErrorMessage, ThemeManager::currentTheme().backgroundColor);
+            vecPages, dScale, bSeparator, &strErrorMessage,
+            ThemeManager::currentTheme().backgroundColor, strAuthor);
         if (image.isNull()) {
             QMessageBox::critical(this, QStringLiteral("导出 PNG"), strErrorMessage);
             return;
@@ -820,7 +858,8 @@ void MainWindow::onExportPng()
             break;
         }
         const QImage image = ExportRenderer::renderPage(vecPages.at(nIndex), dScale,
-                                                        ThemeManager::currentTheme().backgroundColor);
+                                                        ThemeManager::currentTheme().backgroundColor,
+                                                        strAuthor);
         const QString strFileName = QStringLiteral("%1_%2.png")
                                         .arg(strSafeTitle)
                                         .arg(nIndex + 1, 2, 10, QLatin1Char('0'));
@@ -849,6 +888,95 @@ void MainWindow::onCopyPageToClipboard()
     statusBar()->showMessage(QStringLiteral("当前页已复制到剪贴板（2x），可直接粘贴到小黑盒"), 4000);
 }
 
+void MainWindow::onShowSettings()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("设置"));
+    auto* pFormLayout = new QFormLayout(&dialog);
+
+    // 默认画布尺寸
+    auto* pSizeCombo = new QComboBox(&dialog);
+    const QList<QPair<QString, QSize>> presets = {
+        {QStringLiteral("竖图 1080×1440"), QSize(1080, 1440)},
+        {QStringLiteral("横图 1920×1080"), QSize(1920, 1080)},
+        {QStringLiteral("方形 1080×1080"), QSize(1080, 1080)},
+        {QStringLiteral("长图 1080×2400"), QSize(1080, 2400)},
+    };
+    const QSize currentSize = Settings::defaultPageSize();
+    int nCurrentIndex = 0;
+    for (int nIndex = 0; nIndex < presets.size(); ++nIndex) {
+        pSizeCombo->addItem(presets.at(nIndex).first, presets.at(nIndex).second);
+        if (presets.at(nIndex).second == currentSize) {
+            nCurrentIndex = nIndex;
+        }
+    }
+    pSizeCombo->setCurrentIndex(nCurrentIndex);
+    pFormLayout->addRow(QStringLiteral("默认画布尺寸："), pSizeCombo);
+
+    // 自动保存间隔（分钟）
+    auto* pAutoSaveSpin = new QSpinBox(&dialog);
+    pAutoSaveSpin->setRange(1, 60);
+    pAutoSaveSpin->setValue(qMax(1, Settings::autoSaveIntervalMs() / 60000));
+    pFormLayout->addRow(QStringLiteral("自动保存间隔（分钟）："), pAutoSaveSpin);
+
+    // 作者署名
+    auto* pAuthorEdit = new QLineEdit(&dialog);
+    pAuthorEdit->setPlaceholderText(QStringLiteral("如小黑盒 ID"));
+    pAuthorEdit->setText(Settings::authorName());
+    pFormLayout->addRow(QStringLiteral("作者署名："), pAuthorEdit);
+
+    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确定"));
+    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    pFormLayout->addRow(pButtons);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    Settings::setDefaultPageSize(pSizeCombo->currentData().toSize());
+    Settings::setAutoSaveIntervalMs(pAutoSaveSpin->value() * 60000);
+    Settings::setAuthorName(pAuthorEdit->text().trimmed());
+    if (m_pProjectManager->hasProject()) {
+        m_pProjectManager->setAutoSaveIntervalMs(Settings::autoSaveIntervalMs());
+    }
+    statusBar()->showMessage(QStringLiteral("设置已保存"), 3000);
+}
+
+void MainWindow::onShowShortcuts()
+{
+    QMessageBox::information(this, QStringLiteral("快捷键"),
+                             QStringLiteral(
+                                 "新建项目\tCtrl+N\n"
+                                 "打开项目\tCtrl+O\n"
+                                 "保存\tCtrl+S\n"
+                                 "导出 PNG\tCtrl+E\n"
+                                 "复制当前页到剪贴板\tCtrl+Shift+C\n"
+                                 "\n"
+                                 "撤销\tCtrl+Z\n"
+                                 "重做\tCtrl+Y\n"
+                                 "复制\tCtrl+C\n"
+                                 "粘贴\tCtrl+V\n"
+                                 "剪切\tCtrl+X\n"
+                                 "删除选中\tDelete\n"
+                                 "全选\tCtrl+A\n"
+                                 "\n"
+                                 "画布缩放\tCtrl+滚轮\n"
+                                 "设置\tCtrl+,"));
+}
+
+void MainWindow::onShowAbout()
+{
+    QMessageBox::about(this, QStringLiteral("关于 更好的攻略制作器"),
+                       QStringLiteral(
+                           "更好的攻略制作器（Better Walkthrough Maker）\n"
+                           "版本 %1\n\n"
+                           "面向游戏攻略作者的桌面设计工具：\n"
+                           "用模板 + 自由画布制作攻略配图，导出 PNG 发布到小黑盒等平台。")
+                           .arg(QCoreApplication::applicationVersion()));
+}
+
 void MainWindow::onToggleAutoSave(bool bEnabled)
 {
     m_pProjectManager->setAutoSaveEnabled(bEnabled);
@@ -861,6 +989,26 @@ void MainWindow::openProjectPath(const QString& strJsonPath)
     QString strErrorMessage;
     if (!m_pProjectManager->openProject(strJsonPath, &strErrorMessage)) {
         QMessageBox::critical(this, QStringLiteral("打开项目"), strErrorMessage);
+        return;
+    }
+    // 崩溃恢复：打开后检测未完成保存的残留 .tmp，提示恢复
+    const QString strProjectDir = m_pProjectManager->projectDirectory();
+    if (ProjectManager::hasRecoverableSnapshot(strProjectDir)) {
+        const QMessageBox::StandardButton result = QMessageBox::question(
+            this, QStringLiteral("检测到未完成的保存"),
+            QStringLiteral("上次保存可能被中断，是否恢复最近一次保存的内容？"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+        if (result == QMessageBox::Yes) {
+            QString strRecoverError;
+            if (m_pProjectManager->recoverFromSnapshot(&strRecoverError)) {
+                QString strReopenError;
+                if (m_pProjectManager->openProject(strJsonPath, &strReopenError)) {
+                    statusBar()->showMessage(QStringLiteral("已从上次未完成的保存恢复"), 5000);
+                }
+            } else {
+                QMessageBox::warning(this, QStringLiteral("恢复失败"), strRecoverError);
+            }
+        }
     }
 }
 

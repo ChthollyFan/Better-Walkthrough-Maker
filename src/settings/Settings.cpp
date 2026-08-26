@@ -80,4 +80,16 @@ void Settings::setThemeName(const QString& rName)
     settings().setValue(QStringLiteral("theme"), rName);
 }
 
+QByteArray Settings::windowGeometry()
+{
+    return settings().value(QStringLiteral("windowGeometry")).toByteArray();
+}
+
+void Settings::setWindowGeometry(const QByteArray& rGeometry)
+{
+    if (!rGeometry.isEmpty()) {
+        settings().setValue(QStringLiteral("windowGeometry"), rGeometry);
+    }
+}
+
 } // namespace bwm
