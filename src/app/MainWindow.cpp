@@ -1041,6 +1041,12 @@ void MainWindow::onProjectOpened()
     refreshAssetList();
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("已打开项目：%1").arg(m_pProjectManager->projectDirectory()), 5000);
+    // 自动选中第一个攻略的首页，打开项目即有画面
+    const Project* pProject = m_pProjectManager->project();
+    if (pProject && !pProject->vecWalkthroughs.isEmpty()
+        && !pProject->vecWalkthroughs.first().vecPages.isEmpty()) {
+        selectNodeByKey(QStringLiteral("0:0"));
+    }
 }
 
 void MainWindow::onAutoSavePerformed(bool bOk, const QString& strMessage)
@@ -1564,6 +1570,7 @@ void MainWindow::updateCanvasEditor()
     m_pScene->loadPage(*pPage);
     m_bSyncingCanvas = false;
     m_pView->fitInView(m_pScene->sceneRect(), Qt::KeepAspectRatio);
+    m_pView->centerOn(m_pScene->sceneRect().center());
     refreshLayerList();
 }
 

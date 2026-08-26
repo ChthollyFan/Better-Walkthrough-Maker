@@ -26,6 +26,9 @@ void CanvasScene::loadPage(const Page& rPage)
     clear();
     m_vecItems.clear();
 
+    // 显式限定场景范围 = 页面尺寸，避免越界组件把场景撑大导致页面偏移
+    setSceneRect(0, 0, rPage.size.width(), rPage.size.height());
+
     // 页面背景：主题背景色 + 灰边框，不可选中、永远在最底层
     auto* pBackground = addRect(0, 0, rPage.size.width(), rPage.size.height(),
                                 QPen(QColor(140, 140, 140)), QBrush(m_pageBackgroundColor));
