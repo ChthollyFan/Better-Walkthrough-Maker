@@ -1236,10 +1236,46 @@ void MainWindow::onAddPage()
         return;
     }
     Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+
+    // 新建页面：选择本页画布尺寸
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("新建页面"));
+    auto* pFormLayout = new QFormLayout(&dialog);
+    auto* pSizeCombo = new QComboBox(&dialog);
+    const QList<QPair<QString, QSize>> presets = {
+        {QStringLiteral("竖图 1080×1440（推荐）"), QSize(1080, 1440)},
+        {QStringLiteral("横图 1920×1080"), QSize(1920, 1080)},
+        {QStringLiteral("方形 1080×1080"), QSize(1080, 1080)},
+        {QStringLiteral("长图 1080×2400"), QSize(1080, 2400)},
+    };
+    // 默认选中：该攻略已有页面的尺寸，否则全局默认
+    QSize defaultSize = rWalkthrough.vecPages.isEmpty()
+        ? Settings::defaultPageSize()
+        : rWalkthrough.vecPages.first().size;
+    int nDefaultIndex = 0;
+    for (int nIndex = 0; nIndex < presets.size(); ++nIndex) {
+        pSizeCombo->addItem(presets.at(nIndex).first, presets.at(nIndex).second);
+        if (presets.at(nIndex).second == defaultSize) {
+            nDefaultIndex = nIndex;
+        }
+    }
+    pSizeCombo->setCurrentIndex(nDefaultIndex);
+    pFormLayout->addRow(QStringLiteral("页面尺寸："), pSizeCombo);
+
+    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("创建"));
+    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    pFormLayout->addRow(pButtons);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
     Page page;
     page.strName = QStringLiteral("页面 %1").arg(rWalkthrough.vecPages.size() + 1);
-    page.size = rWalkthrough.vecPages.isEmpty() ? Settings::defaultPageSize()
-                                                : rWalkthrough.vecPages.first().size;
+    page.size = pSizeCombo->currentData().toSize();
     rWalkthrough.vecPages.append(page);
     m_pProjectManager->setDirty();
     rebuildProjectTree();
