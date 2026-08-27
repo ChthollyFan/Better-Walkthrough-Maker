@@ -32,6 +32,10 @@
 - [项目规划](docs/project-plan.md) — 产品定位、数据模型、功能模块、技术架构、里程碑与实现记录
 - [C++ 编码规范](docs/c++编码规范.md) — 代码风格与命名约定（开发前请阅读）
 
+## 许可证
+
+[MIT](LICENSE) © 2026 ChthollyFan
+
 ## 构建与测试
 
 依赖：CMake ≥ 3.21、Ninja、MinGW-w64 g++（14.x）、Qt 6（MinGW 版，如 6.11.2）。
