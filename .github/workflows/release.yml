@@ -16,6 +16,10 @@ concurrency:
   group: build-release
   cancel-in-progress: true
 
+# 允许创建 GitHub Release（默认 GITHUB_TOKEN 只有只读权限）
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
