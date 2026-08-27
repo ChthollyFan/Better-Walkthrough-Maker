@@ -35,17 +35,34 @@ jobs:
           # Qt 6.8.3 的 mingw 包运行时为 MinGW 13.1（见安装日志），配套工具链用 1310
           tools: 'tools_mingw1310'
 
-      - name: Locate MinGW g++ and add to PATH
+      - name: Locate Qt and MinGW toolchain
         run: |
-          $toolsRoot = Join-Path (Split-Path (Split-Path $env:Qt6_DIR -Parent) -Parent) 'Tools'
-          $gcc = Get-ChildItem -Path $toolsRoot -Recurse -Filter 'g++.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $gcc) {
-            Write-Error 'MinGW g++ not found under Qt Tools'
-            exit 1
+          # 定位 Qt 前缀：优先 Qt6_DIR 环境变量，否则在 runner workspace 递归查找 qmake6.exe
+          $qtPrefix = $env:Qt6_DIR
+          if (-not $qtPrefix -or -not (Test-Path (Join-Path $qtPrefix 'bin/qmake6.exe'))) {
+            $qmake = Get-ChildItem -Path $env:RUNNER_WORKSPACE -Recurse -Filter 'qmake6.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $qmake) {
+              Write-Error 'qmake6.exe not found under runner workspace'
+              exit 1
+            }
+            $qtPrefix = Split-Path (Split-Path $qmake.FullName -Parent) -Parent
           }
-          $gccDir = Split-Path $gcc.FullName -Parent
-          Write-Host "MinGW g++ directory: $gccDir"
-          echo "$gccDir" >> $env:GITHUB_PATH
+          Write-Host "Qt prefix: $qtPrefix"
+          echo "Qt6_DIR=$qtPrefix" >> $env:GITHUB_ENV
+
+          # 定位 MinGW g++：PATH 中已存在则直接用，否则在 Qt Tools 目录递归查找
+          $gcc = Get-Command g++ -ErrorAction SilentlyContinue
+          if (-not $gcc) {
+            $toolsRoot = Join-Path (Split-Path $qtPrefix -Parent) 'Tools'
+            $gccFile = Get-ChildItem -Path $toolsRoot -Recurse -Filter 'g++.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $gccFile) {
+              Write-Error "MinGW g++ not found under $toolsRoot"
+              exit 1
+            }
+            $gccDir = Split-Path $gccFile.FullName -Parent
+            Write-Host "MinGW g++ directory: $gccDir"
+            echo "$gccDir" >> $env:GITHUB_PATH
+          }
 
       - name: Configure
         run: >
