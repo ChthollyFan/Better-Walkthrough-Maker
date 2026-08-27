@@ -11,6 +11,11 @@ on:
   # 允许在 Actions 页面手动触发（调试/重跑无需删建 tag）
   workflow_dispatch:
 
+# 同一时刻只保留一个运行：新触发自动取消旧的（含 queued/排队中的）
+concurrency:
+  group: build-release
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
