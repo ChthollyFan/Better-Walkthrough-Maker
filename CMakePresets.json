@@ -1,0 +1,50 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "windows-mingw-release",
+      "displayName": "Windows MinGW (Release)",
+      "description": "Ninja + MinGW g++ + Qt 6.11.2（MinGW 版）。显式指定生成器与 Qt 路径，避免 VS Code 自动配置时使用默认生成器或误用 MSVC 版 Qt（环境变量 Qt6_DIR 干扰）。",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_PREFIX_PATH": "C:/Users/ThinkPad/Qt/6.11.2/mingw_64",
+        "Qt6_DIR": "C:/Users/ThinkPad/Qt/6.11.2/mingw_64/lib/cmake/Qt6"
+      }
+    },
+    {
+      "name": "windows-mingw-debug",
+      "displayName": "Windows MinGW (Debug)",
+      "description": "调试构建（注意：当前 Qt 仅安装 Release 库，Debug 链接 Qt 可能失败，主要用于代码浏览/编译检查）。",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_PREFIX_PATH": "C:/Users/ThinkPad/Qt/6.11.2/mingw_64",
+        "Qt6_DIR": "C:/Users/ThinkPad/Qt/6.11.2/mingw_64/lib/cmake/Qt6"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "windows-mingw-release"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "windows-mingw-debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "windows-mingw-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
