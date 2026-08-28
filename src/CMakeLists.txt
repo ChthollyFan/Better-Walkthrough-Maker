@@ -16,8 +16,9 @@ add_library(bwm_core STATIC
 target_include_directories(bwm_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bwm_core PUBLIC Qt6::Widgets)
 
-# 主程序：仅包含应用层（入口与主窗口）
-add_executable(bwm
+# 主程序：仅包含应用层（入口与主窗口）。
+# WIN32 关键字使程序以 Windows GUI 子系统链接，双击启动时不再弹出控制台窗口。
+add_executable(bwm WIN32
   app/main.cpp
   app/MainWindow.cpp
   editor/CanvasScene.cpp
