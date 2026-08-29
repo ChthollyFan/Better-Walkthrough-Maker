@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+## 交互要求
+
+- 全程使用中文思考和交流。
+- 回答问题时避免过分的夸赞；任何判断都需反复推敲，优先保证准确性。
+- 若信息或证据不足，主动向用户索要补充信息或证据，而非臆测。
+- 回答保持结构化输出，条理清晰。
+- 任何 **git 提交（commit）** 之前，必须先向用户列出提交方案（涉及文件、提交信息），并使用 `ask_user_question` 询问是否提交，获得用户明确确认后方可执行。
+- 任何 **发布操作（打 tag / 推送 tag / 创建 Release）** 之前，同样必须先列出方案并使用 `ask_user_question` 询问用户是否执行，确认后方可执行。
+- 此规则对普通提交与文档改动一视同仁，用户未确认前不得执行 git 写操作。
+
 ## 编码规范
 
 参考 /docs/C++语言编码规范.md
@@ -16,6 +26,38 @@
 - `docs/` — 项目规划等文档。
 
 约定：源码放在 `src/` 按功能模块组织；测试放在 `tests/` 镜像 `src/`；其他文档放在 `docs/`。核心库目标为 `bwm_core`（静态库），主程序与测试共用。
+
+## 插件架构
+
+本项目以**动态库运行时加载**为最终插件化目标，当前处于**编译时静态注册**阶段，已预留升级路径。
+
+### 扩展点
+
+所有扩展点通过统一的 `PluginHost`（`src/plugin/PluginHost.h`）注册与查询。当前已定义 5 类接口：
+
+| 扩展点 | 接口 | 头文件 | 作用 |
+| --- | --- | --- | --- |
+| 组件类型 | `IComponentProvider` | `src/plugin/IComponentProvider.h` | 注册新的画布组件类型，自动出现在"插入"菜单和工具栏 |
+| 导出格式 | `IExportProvider` | `src/plugin/IExportProvider.h` | 注册新的导出格式，自动出现在导出对话框格式下拉框 |
+| 面板/视图 | `IPanelProvider` | `src/plugin/IPanelProvider.h` | 注册新的侧边面板，自动以标签页挂载到主界面 |
+| 模板包 | `ITemplateProvider` | `src/plugin/ITemplateProvider.h` | 提供模板集合，合并到"新建攻略"模板选择列表 |
+| 主题 | `IThemeProvider` | `src/plugin/IThemeProvider.h` | 提供主题配色，合并到"主题"菜单 |
+
+### 当前状态
+
+- 内置功能已适配为插件实现，位于 `src/plugin/builtin/`，由 `registerBuiltinPlugins()` 在 `MainWindow` 构造时统一注册。
+- `MainWindow` 的菜单、工具栏、导出对话框等均从 `PluginHost` 动态查询扩展点列表构建，新增插件后无需修改框架代码即可自动出现。
+- `PluginHost` 中预留 `loadPlugins()` 方法（TODO），未来扫描 `plugins/` 目录通过 `QPluginLoader` 动态加载动态库。
+
+### 插件开发流程文档
+
+开发各类插件时，参考以下文档（当用户要求开发某类插件时，应先指向对应文档并与用户讨论细节）：
+
+- 组件类型插件：`docs/plugin-component-dev.md`
+- 导出格式插件：`docs/plugin-export-dev.md`
+- 面板/视图插件：`docs/plugin-panel-dev.md`
+- 模板包插件：`docs/plugin-template-dev.md`
+- 主题插件：`docs/plugin-theme-dev.md`
 
 ## 构建、测试与开发命令
 
@@ -34,7 +76,12 @@ ctest --test-dir build --output-on-failure
 
 # 运行主程序
 build\src\bwm.exe
+
+# 部署 Qt 运行时 DLL 到 exe 同目录（首次编译或清除 build 后需执行一次）
+C:\Users\ThinkPad\Qt\6.11.2\mingw_64\bin\windeployqt.exe --release --compiler-runtime build\src\bwm.exe
 ```
+
+> **注意**：`windeployqt` 会把 Qt6Core/Qt6Widgets/Qt6Gui 等运行时 DLL 及平台插件（`platforms\qwindows.dll`）复制到 `build\src\` 下。清除 `build` 目录重新配置后这些 DLL 会丢失，需重新执行上述部署命令。仅设置 `PATH` 指向 Qt 的 `bin` 目录也可以运行，但双击 exe 时找不到 DLL，推荐用 `windeployqt` 做自包含部署。
 
 注意：本会话沙箱环境下，CMake 与编译命令需要全权限（其内部启动 g++ 并捕获输出，受沙箱管道限制会挂起）。
 
@@ -275,9 +322,3 @@ build\src\bwm.exe
 - [ ] main 分支已包含所有待发布代码
 - [ ] 远程推送成功（`git push --tags`）
 
-## Agent 交互要求
-
-- 全程使用中文思考和交流。
-- 回答问题时避免过分的夸赞；任何判断都需反复推敲，优先保证准确性。
-- 若信息或证据不足，主动向用户索要补充信息或证据，而非臆测。
-- 回答保持结构化输出，条理清晰。
