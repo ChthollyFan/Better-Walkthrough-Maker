@@ -1,36 +1,46 @@
 /**
  * @file MainWindow.h
  * @author zhangweimu
- * @brief 主窗口：菜单栏、工具栏、项目树、画布、图层面板、状态栏（M2a 画布版）。
+ * @brief 主窗口：菜单栏、工具栏、项目树、画布、图层面板、状态栏。
+ *
+ * 重构后 MainWindow 仅作为组装者与协调者：
+ * - 创建 PluginHost 并注册内置插件
+ * - 创建各面板（ProjectTreePanel / AssetPanel / LayerPanel）并连接信号
+ * - 构建菜单栏与工具栏（从 PluginHost 动态获取组件类型列表）
+ * - 路由跨模块信号（如项目树→画布刷新、图层→模型同步）
+ * - 处理文件操作（新建/打开/保存/关闭）与窗口标题
+ *
+ * 不再包含各面板/对话框的内部逻辑，这些已迁移到独立模块。
  */
 #ifndef BWM_APP_MAINWINDOW_H
 #define BWM_APP_MAINWINDOW_H
 
-#include <QHash>
 #include <QMainWindow>
 #include <QVector>
 
 #include "core/Component.h"
+#include "plugin/PluginContext.h"
+#include "plugin/IComponentProvider.h"
 
-class QGraphicsView;
-class QListWidget;
-class QListWidgetItem;
 class QMenu;
+class QTabWidget;
 class QToolBar;
-class QTreeWidget;
-class QTreeWidgetItem;
 class QUndoStack;
 
 namespace bwm {
 
-struct Page;
 class CanvasScene;
 class CanvasView;
 class ComponentItem;
+class LayerPanel;
+class PluginHost;
 class ProjectManager;
+class ProjectTreePanel;
+class AssetPanel;
 
-// 主窗口：菜单栏、工具栏、项目树、画布、图层面板、状态栏。
-class MainWindow : public QMainWindow {
+// 主窗口：组装各面板与画布，路由跨模块信号。
+class MainWindow : public QMainWindow
+{
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* pParent = nullptr);
@@ -41,6 +51,7 @@ protected:
     void closeEvent(QCloseEvent* pEvent) override;
 
 private slots:
+    // 文件操作
     void onNewProject();
     void onOpenProject();
     void onOpenRecentProject();
@@ -51,118 +62,99 @@ private slots:
     void onShowShortcuts();
     void onShowAbout();
     void onToggleAutoSave(bool bEnabled);
-    void onProjectTreeSelectionChanged();
     void onProjectOpened();
     void onAutoSavePerformed(bool bOk, const QString& strMessage);
-    // 攻略 / 页面管理
-    void onTreeContextMenu(const QPoint& rPos);
-    void onAddWalkthrough();
-    void onAddPage();
-    void onRenameNode();
-    void onDeleteNode();
-    // 模板
-    void onSaveAsTemplate();
-    void onImportTemplate();
-    void onExportTemplate();
-    // 装饰贴纸
-    void onAddStickerComponent(int nIndex);
 
-    // 插入组件
-    void onAddImageComponent();
-    void onAddTextComponent();
-    void onAddShapeComponent(int nIndex);
-    void onAddTableComponent();
-    // 编辑
-    void onDeleteSelected();
-    void onSelectAllComponents();
+    // 项目树信号处理
+    void onPageSelected(const QString& rPageKey);
+    void onProjectStructureChanged();
+
     // 画布与模型同步
     void onCanvasComponentsChanged();
     void onCanvasSelectionChanged();
-    // 编辑事务（撤销快照）
     void onComponentEditStarted();
     void onComponentEditFinished();
-    // 复制/粘贴/剪切
+
+    // 编辑操作
+    void onDeleteSelected();
+    void onSelectAllComponents();
     void onCopy();
     void onPaste();
     void onCut();
-    // 对齐与分布（nAlign 见 E_ALIGN_* 常量）
     void onAlignComponents(int nAlign);
     void onDistributeComponents(bool bHorizontal);
-    // 右键菜单
     void onCanvasContextMenu(const QPointF& rScenePos);
-    // 素材库
-    void onImportAssets();
-    void onAssetDoubleClicked(QListWidgetItem* pItem);
-    void onAssetContextMenu(const QPoint& rPos);
+
     // 吸附开关
     void onToggleSnapToGrid(bool bEnable);
     void onToggleSnapToGuides(bool bEnable);
-    // 图层操作
-    void onLayerMoveUp();
-    void onLayerMoveDown();
-    void onLayerToTop();
-    void onLayerToBottom();
-    void onLayerSelectionChanged();
-    void onLayerVisibilityChanged(QListWidgetItem* pItem);
+
+    // 素材面板信号处理
+    void onAssetInserted(const Component& rComponent);
 
 private:
     // 对齐类型常量（onAlignComponents 的参数）
     enum E_ALIGN_TYPE {
-        E_ALIGN_LEFT = 0,     // 左对齐
-        E_ALIGN_H_CENTER,     // 水平居中
-        E_ALIGN_RIGHT,        // 右对齐
-        E_ALIGN_TOP,          // 顶对齐
-        E_ALIGN_V_CENTER,     // 垂直居中
-        E_ALIGN_BOTTOM,       // 底对齐
+        E_ALIGN_LEFT = 0,
+        E_ALIGN_H_CENTER,
+        E_ALIGN_RIGHT,
+        E_ALIGN_TOP,
+        E_ALIGN_V_CENTER,
+        E_ALIGN_BOTTOM,
     };
 
+    // ---- UI 构建 ----
     void createMenus();
     void createToolBar();
     void createCentralWidget();
     void createStatusBar();
-    void rebuildProjectTree();
+    void refreshRecentProjectsMenu();
+
+    // ---- 画布与模型同步 ----
     void updateCanvasEditor();
     void syncCanvasToModel();
-    void refreshLayerList();
-    void updateWindowTitle();
+    void applyTheme();
+
+    // ---- 项目/页面辅助 ----
     void openProjectPath(const QString& strJsonPath);
-    void refreshRecentProjectsMenu();
-    QString selectedPageKey() const;
-    QString selectedNodeKey() const;
-    void selectNodeByKey(const QString& rKey);
     Page* currentPage();
-    // 当前页组件快照（撤销命令用）
     QVector<Component> currentComponents();
-    // 提交一个快照撤销命令（前后一致时不提交）
     void pushSnapshot(const QString& strText, const QVector<Component>& rBefore,
                       const QVector<Component>& rAfter);
-    // 图层交换辅助：按方向交换相邻图层的 zOrder
-    void moveLayer(int nOffset);
-    void moveLayerTo(int nTargetIndex);
-    // 将指定图元置顶/置底
-    void setItemToTop(ComponentItem* pItem, bool bTop);
-    // 右键菜单辅助
-    ComponentItem* componentItemAt(const QPointF& rScenePos) const;
-    // 应用当前主题（画布背景色等）
-    void applyTheme();
-    // 素材库：刷新缩略图列表
-    void refreshAssetList();
+    void updateWindowTitle();
 
-    ProjectManager* m_pProjectManager = nullptr;        // 项目管理
-    CanvasScene* m_pScene = nullptr;                    // 画布场景
-    CanvasView* m_pView = nullptr;                      // 画布视图
-    QTreeWidget* m_pProjectTree = nullptr;              // 项目树
-    QListWidget* m_pLayerList = nullptr;                // 图层面板
-    QMenu* m_pRecentProjectsMenu = nullptr;             // 最近项目菜单
-    QToolBar* m_pToolBar = nullptr;                     // 工具栏
-    QListWidget* m_pAssetList = nullptr;                // 素材库列表
-    QUndoStack* m_pUndoStack = nullptr;                 // 撤销栈
-    bool m_bSyncingCanvas = false;                      // 防止同步时信号回环
-    bool m_bInEditTransaction = false;                  // 是否处于编辑事务中
-    QVector<Component> m_editBeforeSnapshot;            // 编辑事务前的组件快照
-    QVector<Component> m_vecClipboard;                  // 应用内剪贴板（跨页面/项目）
-    // 树节点 → 数据路径（"攻略索引:页面索引" 或 "攻略索引" 或 空=项目）
-    QHash<QTreeWidgetItem*, QString> m_mapNodeKeys;
+    // ---- 组件插入（统一入口，供菜单/工具栏调用）----
+    void insertComponent(const IComponentProvider* pProvider);
+
+    // ---- 图层辅助 ----
+    void setItemToTop(ComponentItem* pItem, bool bTop);
+    ComponentItem* componentItemAt(const QPointF& rScenePos) const;
+
+    // ---- 构建当前插件上下文 ----
+    PluginContext makeContext() const;
+
+    // ---- 核心对象 ----
+    PluginHost* m_pHost = nullptr;                ///< 插件宿主
+    ProjectManager* m_pProjectManager = nullptr;  ///< 项目管理
+    CanvasScene* m_pScene = nullptr;              ///< 画布场景
+    CanvasView* m_pView = nullptr;                ///< 画布视图
+    QUndoStack* m_pUndoStack = nullptr;           ///< 撤销栈
+
+    // ---- 面板 ----
+    ProjectTreePanel* m_pTreePanel = nullptr;     ///< 项目树面板
+    AssetPanel* m_pAssetPanel = nullptr;          ///< 素材库面板
+    LayerPanel* m_pLayerPanel = nullptr;          ///< 图层面板
+    QTabWidget* m_pTabPanel = nullptr;            ///< 右侧标签页容器
+
+    // ---- UI 控件 ----
+    QMenu* m_pRecentProjectsMenu = nullptr;       ///< 最近项目菜单
+    QToolBar* m_pToolBar = nullptr;               ///< 工具栏
+
+    // ---- 状态标志 ----
+    bool m_bSyncingCanvas = false;                ///< 防止同步时信号回环
+    bool m_bInEditTransaction = false;            ///< 是否处于编辑事务中
+    QVector<Component> m_editBeforeSnapshot;      ///< 编辑事务前的组件快照
+    QVector<Component> m_vecClipboard;            ///< 应用内剪贴板
 };
 
 } // namespace bwm
