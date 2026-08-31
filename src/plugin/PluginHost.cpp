@@ -84,4 +84,18 @@ const QVector<IThemeProvider*>& PluginHost::themeProviders() const
     return m_vecThemeProviders;
 }
 
+// ---- UI 风格扩展点 ----
+
+void PluginHost::registerUiStyleProvider(IUiStyleProvider* pProvider)
+{
+    if(pProvider) {
+        m_vecUiStyleProviders.append(pProvider);
+    }
+}
+
+const QVector<IUiStyleProvider*>& PluginHost::uiStyleProviders() const
+{
+    return m_vecUiStyleProviders;
+}
+
 } // namespace bwm

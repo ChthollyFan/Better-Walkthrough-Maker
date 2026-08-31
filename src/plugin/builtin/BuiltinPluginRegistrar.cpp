@@ -15,6 +15,8 @@
 #include "plugin/builtin/BuiltinExportProviders.h"
 #include "plugin/builtin/BuiltinTemplateProviders.h"
 #include "plugin/builtin/BuiltinThemeProviders.h"
+#include "ui/AcrylicStyleProvider.h"
+#include "ui/UiStyle.h"
 
 namespace bwm {
 
@@ -71,6 +73,12 @@ void registerBuiltinPlugins(PluginHost* pHost)
     // ---- 主题 Provider ----
     static BuiltinThemeProvider* s_pTheme = new BuiltinThemeProvider;
     pHost->registerThemeProvider(s_pTheme);
+
+    // ---- UI 风格 Provider（窗口/控件外观）----
+    static AcrylicStyleProvider* s_pUiStyle = new AcrylicStyleProvider;
+    pHost->registerUiStyleProvider(s_pUiStyle);
+    // 同时注册到 UiStyleManager 的静态列表（供 availableStyles / applyCurrentStyle 使用）
+    UiStyleManager::registerProvider(s_pUiStyle);
 }
 
 } // namespace bwm

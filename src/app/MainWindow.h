@@ -49,6 +49,8 @@ public:
 protected:
     // 关闭前检查未保存更改（保存/不保存/取消）
     void closeEvent(QCloseEvent* pEvent) override;
+    // 窗口首次可见后重新应用 UI 风格（DWM 亚克力需窗口有可见区域后才生效）
+    void showEvent(QShowEvent* pEvent) override;
 
 private slots:
     // 文件操作
@@ -114,6 +116,7 @@ private:
     void updateCanvasEditor();
     void syncCanvasToModel();
     void applyTheme();
+    void applyUiStyle();
 
     // ---- 项目/页面辅助 ----
     void openProjectPath(const QString& strJsonPath);

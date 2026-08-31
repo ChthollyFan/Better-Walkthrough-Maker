@@ -34,6 +34,8 @@
 #include "project/ProjectManager.h"
 #include "settings/Settings.h"
 #include "theme/Theme.h"
+#include "ui/UiStyle.h"
+#include "plugin/IUiStyleProvider.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -41,6 +43,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QShowEvent>
 #include <QCoreApplication>
 #include <QCursor>
 #include <QDesktopServices>
@@ -80,8 +83,11 @@ MainWindow::MainWindow(QWidget* pParent)
 
     m_pUndoStack = new QUndoStack(this);
 
-    // 注册内置插件（组件类型、导出格式、模板、主题）
+    // 注册内置插件（组件类型、导出格式、模板、主题、UI 风格）
     registerBuiltinPlugins(m_pHost);
+
+    // 确保持久化的 UI 风格 id 在可用列表内（如用户之前选过已删除的 system，回退到第一个）
+    UiStyleManager::ensureCurrentStyleAvailable();
 
     // 构建 UI（顺序：中央区先建以创建各面板，再建菜单/工具栏以连接面板 slot）
     createCentralWidget();
@@ -108,9 +114,18 @@ MainWindow::MainWindow(QWidget* pParent)
             this, &MainWindow::onCanvasContextMenu);
 
     applyTheme();   // 应用持久化的主题（画布背景色等）
+    applyUiStyle();  // 应用持久化的 UI 风格（亚克力等窗口外观）
 }
 
 MainWindow::~MainWindow() = default;
+
+void MainWindow::showEvent(QShowEvent* pEvent)
+{
+    QMainWindow::showEvent(pEvent);
+    // 窗口可见后重新应用 UI 风格，确保 DWM 亚克力模糊在窗口有可见区域后生效。
+    // 幂等：DWM 属性与 stylesheet 重复设置无害。
+    applyUiStyle();
+}
 
 // =========================================================================
 // UI 构建
@@ -297,6 +312,24 @@ void MainWindow::createMenus()
     connect(pThemeGroup, &QActionGroup::triggered, this, [this](QAction* pAction) {
         ThemeManager::setCurrentThemeName(pAction->data().toString());
         applyTheme();
+    });
+
+    // ---- 界面外观分组（UI 风格，与画布配色独立）----
+    pThemeMenu->addSection(QStringLiteral("界面外观"));
+    auto* pUiStyleGroup = new QActionGroup(this);
+    const QString strCurrentUiStyle = UiStyleManager::currentStyleId();
+    for(const UiStyleDescriptor& rDesc : UiStyleManager::availableStyles()) {
+        QAction* pUiStyleAction = pThemeMenu->addAction(rDesc.strDisplayName);
+        pUiStyleAction->setCheckable(true);
+        pUiStyleAction->setData(rDesc.strId);
+        if(rDesc.strId == strCurrentUiStyle) {
+            pUiStyleAction->setChecked(true);
+        }
+        pUiStyleGroup->addAction(pUiStyleAction);
+    }
+    connect(pUiStyleGroup, &QActionGroup::triggered, this, [this](QAction* pAction) {
+        UiStyleManager::setCurrentStyleId(pAction->data().toString());
+        applyUiStyle();
     });
 
     // ---- 帮助菜单 ----
@@ -707,6 +740,14 @@ void MainWindow::applyTheme()
     m_pScene->setPageBackgroundColor(theme.backgroundColor);
     m_pView->viewport()->update();
     updateCanvasEditor();
+}
+
+void MainWindow::applyUiStyle()
+{
+    // 应用当前 UI 风格（亚克力等）到主窗口。非 Windows 或失败时回退 system。
+    // 不调用 applyTheme：画布背景由 CanvasScene 的页面矩形控制，不受窗口透明影响；
+    // 且 applyTheme 会重建画布，showEvent 多次触发会丢失选中状态。
+    UiStyleManager::applyCurrentStyle(this);
 }
 
 // =========================================================================

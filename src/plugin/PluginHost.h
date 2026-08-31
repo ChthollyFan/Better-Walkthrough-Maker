@@ -28,6 +28,7 @@ class IExportProvider;
 class IPanelProvider;
 class ITemplateProvider;
 class IThemeProvider;
+class IUiStyleProvider;
 
 /**
  * @brief 插件宿主：管理全部扩展点注册表。
@@ -72,10 +73,15 @@ public:
     void registerTemplateProvider(ITemplateProvider* pProvider);
     const QVector<ITemplateProvider*>& templateProviders() const;
 
-    // ---- 主题扩展点 ----
+    // ---- 主题扩展点（画布配色）----
 
     void registerThemeProvider(IThemeProvider* pProvider);
     const QVector<IThemeProvider*>& themeProviders() const;
+
+    // ---- UI 风格扩展点（窗口/控件外观）----
+
+    void registerUiStyleProvider(IUiStyleProvider* pProvider);
+    const QVector<IUiStyleProvider*>& uiStyleProviders() const;
 
     // TODO: 未来在此添加 loadPlugins() 方法，扫描 plugins/ 目录
     //       通过 QPluginLoader 动态加载动态库插件并调用其注册方法。
@@ -87,6 +93,7 @@ private:
     QVector<IPanelProvider*>      m_vecPanelProviders;       ///< 面板注册表
     QVector<ITemplateProvider*>   m_vecTemplateProviders;    ///< 模板注册表
     QVector<IThemeProvider*>      m_vecThemeProviders;       ///< 主题注册表
+    QVector<IUiStyleProvider*>    m_vecUiStyleProviders;     ///< UI 风格注册表
 };
 
 } // namespace bwm

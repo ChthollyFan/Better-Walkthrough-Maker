@@ -13,6 +13,10 @@ add_library(bwm_core STATIC
   template/BuiltinTemplates.cpp
   template/TemplateManager.cpp
   theme/Theme.cpp
+  # UI 外观层（窗口/控件风格）
+  ui/AcrylicHelper.cpp
+  ui/AcrylicStyleProvider.cpp
+  ui/UiStyle.cpp
   # 插件接口与宿主
   plugin/PluginHost.cpp
   # 内置适配器
@@ -24,6 +28,10 @@ add_library(bwm_core STATIC
 )
 target_include_directories(bwm_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bwm_core PUBLIC Qt6::Widgets)
+if(WIN32)
+    # AcrylicHelper 调用 DWM API（DwmSetWindowAttribute 等）
+    target_link_libraries(bwm_core PUBLIC dwmapi)
+endif()
 
 # 主程序：仅包含应用层（入口与主窗口、面板、对话框、命令）。
 # WIN32 关键字使程序以 Windows GUI 子系统链接，双击启动时不再弹出控制台窗口。
