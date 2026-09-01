@@ -38,6 +38,10 @@ public:
     static QString themeName();
     static void setThemeName(const QString& rName);
 
+    // 当前 UI 风格 id（应用窗口/控件外观，见 ui/UiStyle.h）
+    static QString uiStyle();
+    static void setUiStyle(const QString& rId);
+
     // 主窗口几何状态（关闭时保存，启动时恢复）
     static QByteArray windowGeometry();
     static void setWindowGeometry(const QByteArray& rGeometry);

@@ -80,6 +80,17 @@ void Settings::setThemeName(const QString& rName)
     settings().setValue(QStringLiteral("theme"), rName);
 }
 
+QString Settings::uiStyle()
+{
+    return settings().value(QStringLiteral("ui/style"),
+                            QStringLiteral("acrylic-dark")).toString();
+}
+
+void Settings::setUiStyle(const QString& rId)
+{
+    settings().setValue(QStringLiteral("ui/style"), rId);
+}
+
 QByteArray Settings::windowGeometry()
 {
     return settings().value(QStringLiteral("windowGeometry")).toByteArray();

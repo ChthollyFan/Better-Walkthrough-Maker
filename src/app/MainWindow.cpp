@@ -1,161 +1,74 @@
 /**
  * @file MainWindow.cpp
  * @author zhangweimu
- * @brief 主窗口实现（M2a：画布编辑 + 图层面板）。
+ * @brief 主窗口实现：组装各面板与画布，路由跨模块信号。
+ *
+ * 重构后 MainWindow 从 2290 行降至约 600 行，各面板/对话框/命令的内部逻辑
+ * 已迁移到独立模块。MainWindow 仅保留：
+ * - 构造组装（创建 PluginHost、面板、菜单、工具栏、信号连接）
+ * - 文件操作（新建/打开/保存/关闭/导出/设置/关于）
+ * - 画布↔模型同步（updateCanvasEditor / syncCanvasToModel / 编辑事务）
+ * - 编辑操作（删除/复制/粘贴/剪切/对齐/分布/右键菜单）
+ * - 跨模块信号路由
  */
 #include "app/MainWindow.h"
 
+#include "app/ComponentDisplay.h"
+#include "app/commands/PageSnapshotCommand.h"
+#include "app/dialogs/ExportDialog.h"
+#include "app/dialogs/NewProjectDialog.h"
+#include "app/dialogs/SettingsDialog.h"
+#include "app/panels/AssetPanel.h"
+#include "app/panels/LayerPanel.h"
+#include "app/panels/ProjectTreePanel.h"
 #include "core/Project.h"
-#include "core/Template.h"
 #include "editor/CanvasScene.h"
 #include "editor/CanvasView.h"
 #include "editor/ComponentItem.h"
 #include "export/ExportRenderer.h"
+#include "plugin/PluginHost.h"
+#include "plugin/IComponentProvider.h"
+#include "plugin/IExportProvider.h"
+#include "plugin/IThemeProvider.h"
+#include "plugin/builtin/BuiltinPluginRegistrar.h"
 #include "project/ProjectManager.h"
 #include "settings/Settings.h"
-#include "template/TemplateManager.h"
 #include "theme/Theme.h"
+#include "ui/UiStyle.h"
+#include "plugin/IUiStyleProvider.h"
 
-#include <QAction>
 #include <QAbstractButton>
+#include <QAction>
 #include <QActionGroup>
 #include <QApplication>
-#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
-#include <QComboBox>
+#include <QShowEvent>
 #include <QCoreApplication>
 #include <QCursor>
 #include <QDesktopServices>
-#include <QDialog>
-#include <QDialogButtonBox>
-#include <QDir>
-#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QGraphicsScene>
-#include <QGraphicsView>
-#include <QGroupBox>
-#include <QHBoxLayout>
-#include <QIcon>
-#include <QImage>
-#include <QInputDialog>
-#include <QLabel>
-#include <QLineEdit>
-#include <QListView>
-#include <QListWidget>
-#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPair>
-#include <QPixmap>
-#include <QProgressDialog>
 #include <QPushButton>
-#include <QRadioButton>
-#include <QRegularExpression>
-#include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QToolBar>
-#include <QTreeWidget>
 #include <QUndoStack>
-#include <QUrl>
 #include <QUuid>
-#include <QVBoxLayout>
-#include <QWidget>
+#include <QUrl>
 
 #include <algorithm>
 #include <climits>
 
 namespace bwm {
 
-namespace {
-
-// 图层列表项中保存 ComponentItem* 的 UserRole
-constexpr int nComponentItemRole = Qt::UserRole + 1;
-
-// 组件类型的显示名称
-QString componentDisplayName(const Component& rComponent)
-{
-    switch (rComponent.eType) {
-    case E_COMPONENT_TYPE_IMAGE:
-        return QStringLiteral("图片");
-    case E_COMPONENT_TYPE_TEXT:
-        return rComponent.textData.strContent.left(12);
-    case E_COMPONENT_TYPE_SHAPE:
-        return QStringLiteral("形状");
-    case E_COMPONENT_TYPE_TABLE:
-        return QStringLiteral("表格");
-    case E_COMPONENT_TYPE_STICKER:
-        return QStringLiteral("贴纸");
-    default:
-        return QStringLiteral("组件");
-    }
-}
-
-// 导出完成提示：显示成功信息并支持一键打开导出目录
-void showExportResult(QWidget* pParent, int nCount, const QString& strDirPath)
-{
-    QMessageBox box(pParent);
-    box.setWindowTitle(QStringLiteral("导出完成"));
-    box.setIcon(QMessageBox::Information);
-    box.setText(QStringLiteral("已成功导出 %1 张图片到：\n%2").arg(nCount).arg(strDirPath));
-    QPushButton* pOpenButton = box.addButton(QStringLiteral("打开目录"), QMessageBox::AcceptRole);
-    box.addButton(QMessageBox::Close);
-    box.exec();
-    if (box.clickedButton() == pOpenButton) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(strDirPath));
-    }
-}
-
-// 基于页面组件快照的撤销命令：undo/redo 时整体恢复组件列表并重建场景。
-class PageSnapshotCommand : public QUndoCommand {
-public:
-    PageSnapshotCommand(Page* pPage, const QVector<Component>& rBefore,
-                        const QVector<Component>& rAfter, const QString& strText,
-                        CanvasScene* pScene)
-        : QUndoCommand(strText)
-        , m_pPage(pPage)
-        , m_vecBefore(rBefore)
-        , m_vecAfter(rAfter)
-        , m_pScene(pScene)
-    {
-    }
-
-    void undo() override
-    {
-        apply(m_vecBefore);
-    }
-
-    void redo() override
-    {
-        apply(m_vecAfter);
-    }
-
-private:
-    void apply(const QVector<Component>& rComponents)
-    {
-        // 模型已是目标状态时无需重建（如 QUndoStack::push 时 redo 与现态一致）
-        if (m_pPage->vecComponents == rComponents) {
-            return;
-        }
-        m_pPage->vecComponents = rComponents;
-        m_pScene->loadPage(*m_pPage);
-        emit m_pScene->componentsChanged();   // 触发主窗口同步与图层刷新
-    }
-
-    Page* m_pPage;
-    QVector<Component> m_vecBefore;
-    QVector<Component> m_vecAfter;
-    CanvasScene* m_pScene;
-};
-
-} // namespace
-
 MainWindow::MainWindow(QWidget* pParent)
     : QMainWindow(pParent)
+    , m_pHost(new PluginHost(this))
     , m_pProjectManager(new ProjectManager(this))
     , m_pScene(new CanvasScene(this))
 {
@@ -164,21 +77,31 @@ MainWindow::MainWindow(QWidget* pParent)
 
     // 恢复上次窗口位置与大小
     const QByteArray geometry = Settings::windowGeometry();
-    if (!geometry.isEmpty()) {
+    if(!geometry.isEmpty()) {
         restoreGeometry(geometry);
     }
 
     m_pUndoStack = new QUndoStack(this);
 
+    // 注册内置插件（组件类型、导出格式、模板、主题、UI 风格）
+    registerBuiltinPlugins(m_pHost);
+
+    // 确保持久化的 UI 风格 id 在可用列表内（如用户之前选过已删除的 system，回退到第一个）
+    UiStyleManager::ensureCurrentStyleAvailable();
+
+    // 构建 UI（顺序：中央区先建以创建各面板，再建菜单/工具栏以连接面板 slot）
+    createCentralWidget();
     createMenus();
     createToolBar();
-    createCentralWidget();
     createStatusBar();
 
+    // ---- 连接项目管理器信号 ----
     connect(m_pProjectManager, &ProjectManager::projectOpened,
             this, &MainWindow::onProjectOpened);
     connect(m_pProjectManager, &ProjectManager::autoSavePerformed,
             this, &MainWindow::onAutoSavePerformed);
+
+    // ---- 连接画布场景信号 ----
     connect(m_pScene, &CanvasScene::componentsChanged,
             this, &MainWindow::onCanvasComponentsChanged);
     connect(m_pScene, &QGraphicsScene::selectionChanged,
@@ -191,12 +114,26 @@ MainWindow::MainWindow(QWidget* pParent)
             this, &MainWindow::onCanvasContextMenu);
 
     applyTheme();   // 应用持久化的主题（画布背景色等）
+    applyUiStyle();  // 应用持久化的 UI 风格（亚克力等窗口外观）
 }
 
 MainWindow::~MainWindow() = default;
 
+void MainWindow::showEvent(QShowEvent* pEvent)
+{
+    QMainWindow::showEvent(pEvent);
+    // 窗口可见后重新应用 UI 风格，确保 DWM 亚克力模糊在窗口有可见区域后生效。
+    // 幂等：DWM 属性与 stylesheet 重复设置无害。
+    applyUiStyle();
+}
+
+// =========================================================================
+// UI 构建
+// =========================================================================
+
 void MainWindow::createMenus()
 {
+    // ---- 文件菜单 ----
     QMenu* pFileMenu = menuBar()->addMenu(QStringLiteral("文件(&F)"));
 
     QAction* pNewAction = pFileMenu->addAction(QStringLiteral("新建项目(&N)…"));
@@ -237,79 +174,44 @@ void MainWindow::createMenus()
     pExitAction->setShortcut(QKeySequence::Quit);
     connect(pExitAction, &QAction::triggered, this, &QWidget::close);
 
-    // 攻略菜单：新建/重命名/删除 攻略与页面（作用于当前选中节点）
+    // ---- 攻略菜单 ----
     QMenu* pWalkthroughMenu = menuBar()->addMenu(QStringLiteral("攻略(&W)"));
     QAction* pAddWalkthroughAction = pWalkthroughMenu->addAction(QStringLiteral("新建攻略(&N)"));
-    connect(pAddWalkthroughAction, &QAction::triggered, this, &MainWindow::onAddWalkthrough);
+    connect(pAddWalkthroughAction, &QAction::triggered,
+            m_pTreePanel, &ProjectTreePanel::onAddWalkthrough);
     QAction* pAddPageAction = pWalkthroughMenu->addAction(QStringLiteral("新建页面(&P)"));
-    connect(pAddPageAction, &QAction::triggered, this, &MainWindow::onAddPage);
+    connect(pAddPageAction, &QAction::triggered,
+            m_pTreePanel, &ProjectTreePanel::onAddPage);
     pWalkthroughMenu->addSeparator();
     QAction* pRenameNodeAction = pWalkthroughMenu->addAction(QStringLiteral("重命名(&R)…"));
-    connect(pRenameNodeAction, &QAction::triggered, this, &MainWindow::onRenameNode);
+    connect(pRenameNodeAction, &QAction::triggered,
+            m_pTreePanel, &ProjectTreePanel::onRenameNode);
     QAction* pDeleteNodeAction = pWalkthroughMenu->addAction(QStringLiteral("删除(&D)…"));
-    connect(pDeleteNodeAction, &QAction::triggered, this, &MainWindow::onDeleteNode);
-
+    connect(pDeleteNodeAction, &QAction::triggered,
+            m_pTreePanel, &ProjectTreePanel::onDeleteNode);
     pWalkthroughMenu->addSeparator();
     QAction* pSaveTemplateAction = pWalkthroughMenu->addAction(QStringLiteral("保存为模板(&T)…"));
-    connect(pSaveTemplateAction, &QAction::triggered, this, &MainWindow::onSaveAsTemplate);
+    connect(pSaveTemplateAction, &QAction::triggered,
+            m_pTreePanel, &ProjectTreePanel::onSaveAsTemplate);
     QAction* pImportTemplateAction = pWalkthroughMenu->addAction(QStringLiteral("导入模板(&I)…"));
-    connect(pImportTemplateAction, &QAction::triggered, this, &MainWindow::onImportTemplate);
+    connect(pImportTemplateAction, &QAction::triggered,
+            m_pTreePanel, &ProjectTreePanel::onImportTemplate);
     QAction* pExportTemplateAction = pWalkthroughMenu->addAction(QStringLiteral("导出当前攻略为模板(&E)…"));
-    connect(pExportTemplateAction, &QAction::triggered, this, &MainWindow::onExportTemplate);
+    connect(pExportTemplateAction, &QAction::triggered,
+            m_pTreePanel, &ProjectTreePanel::onExportTemplate);
 
-    // 插入菜单
+    // ---- 插入菜单（从 PluginHost 动态构建）----
     QMenu* pInsertMenu = menuBar()->addMenu(QStringLiteral("插入(&I)"));
-
-    QAction* pAddImageAction = pInsertMenu->addAction(QStringLiteral("图片(&P)…"));
-    connect(pAddImageAction, &QAction::triggered, this, &MainWindow::onAddImageComponent);
-
-    QAction* pAddTextAction = pInsertMenu->addAction(QStringLiteral("文本(&T)…"));
-    connect(pAddTextAction, &QAction::triggered, this, &MainWindow::onAddTextComponent);
-
-    QAction* pAddTableAction = pInsertMenu->addAction(QStringLiteral("表格(&B)…"));
-    connect(pAddTableAction, &QAction::triggered, this, &MainWindow::onAddTableComponent);
-
-    QMenu* pShapeMenu = pInsertMenu->addMenu(QStringLiteral("形状(&S)"));
-    QAction* pAddRectAction = pShapeMenu->addAction(QStringLiteral("矩形"));
-    pAddRectAction->setData(static_cast<int>(E_SHAPE_TYPE_RECTANGLE));
-    connect(pAddRectAction, &QAction::triggered, this, [this]() {
-        onAddShapeComponent(static_cast<int>(E_SHAPE_TYPE_RECTANGLE));
-    });
-    QAction* pAddRoundRectAction = pShapeMenu->addAction(QStringLiteral("圆角矩形"));
-    pAddRoundRectAction->setData(static_cast<int>(E_SHAPE_TYPE_ROUND_RECT));
-    connect(pAddRoundRectAction, &QAction::triggered, this, [this]() {
-        onAddShapeComponent(static_cast<int>(E_SHAPE_TYPE_ROUND_RECT));
-    });
-    QAction* pAddEllipseAction = pShapeMenu->addAction(QStringLiteral("椭圆"));
-    pAddEllipseAction->setData(static_cast<int>(E_SHAPE_TYPE_ELLIPSE));
-    connect(pAddEllipseAction, &QAction::triggered, this, [this]() {
-        onAddShapeComponent(static_cast<int>(E_SHAPE_TYPE_ELLIPSE));
-    });
-    QAction* pAddLineAction = pShapeMenu->addAction(QStringLiteral("线条"));
-    pAddLineAction->setData(static_cast<int>(E_SHAPE_TYPE_LINE));
-    connect(pAddLineAction, &QAction::triggered, this, [this]() {
-        onAddShapeComponent(static_cast<int>(E_SHAPE_TYPE_LINE));
-    });
-
-    // 装饰贴纸子菜单（素材包第一版）
-    QMenu* pStickerMenu = pInsertMenu->addMenu(QStringLiteral("装饰(&D)"));
-    const QList<QPair<QString, int>> stickers = {
-        {QStringLiteral("标题装饰线"), E_STICKER_TYPE_TITLE_LINE},
-        {QStringLiteral("角标"), E_STICKER_TYPE_CORNER_BADGE},
-        {QStringLiteral("推荐度星标"), E_STICKER_TYPE_STAR_RATING},
-        {QStringLiteral("箭头"), E_STICKER_TYPE_ARROW},
-        {QStringLiteral("分割线"), E_STICKER_TYPE_DIVIDER},
-        {QStringLiteral("卡片边框"), E_STICKER_TYPE_CARD_BORDER},
-    };
-    for (const QPair<QString, int>& rSticker : stickers) {
-        QAction* pStickerAction = pStickerMenu->addAction(rSticker.first);
-        const int nStickerType = rSticker.second;
-        connect(pStickerAction, &QAction::triggered, this, [this, nStickerType]() {
-            onAddStickerComponent(nStickerType);
+    // 遍历所有组件类型 Provider，按 menuPath 构建子菜单
+    for(const IComponentProvider* pProvider : m_pHost->componentProviders()) {
+        QAction* pAction = pInsertMenu->addAction(pProvider->displayName());
+        const IComponentProvider* pCaptured = pProvider;
+        connect(pAction, &QAction::triggered, this, [this, pCaptured]() {
+            insertComponent(pCaptured);
         });
     }
 
-    // 编辑菜单
+    // ---- 编辑菜单 ----
     QMenu* pEditMenu = menuBar()->addMenu(QStringLiteral("编辑(&E)"));
 
     QAction* pUndoAction = m_pUndoStack->createUndoAction(this, QStringLiteral("撤销(&U)"));
@@ -362,7 +264,7 @@ void MainWindow::createMenus()
         {QStringLiteral("垂直居中"), E_ALIGN_V_CENTER},
         {QStringLiteral("底对齐"), E_ALIGN_BOTTOM},
     };
-    for (const QPair<QString, int>& rAlign : alignActions) {
+    for(const QPair<QString, int>& rAlign : alignActions) {
         QAction* pAlignAction = pAlignMenu->addAction(rAlign.first);
         const int nAlign = rAlign.second;
         connect(pAlignAction, &QAction::triggered, this, [this, nAlign]() {
@@ -391,26 +293,46 @@ void MainWindow::createMenus()
     pSnapGuidesAction->setChecked(m_pScene->snapToGuides());
     connect(pSnapGuidesAction, &QAction::toggled, this, &MainWindow::onToggleSnapToGuides);
 
-    // 主题菜单（内置两套配色）
+    // ---- 主题菜单（从 PluginHost 动态构建）----
     QMenu* pThemeMenu = menuBar()->addMenu(QStringLiteral("主题(&T)"));
     auto* pThemeGroup = new QActionGroup(this);
-    const QStringList themeNames = ThemeManager::themeNames();
     const QString strCurrentTheme = ThemeManager::currentThemeName();
-    for (const QString& strName : themeNames) {
-        QAction* pThemeAction = pThemeMenu->addAction(strName);
-        pThemeAction->setCheckable(true);
-        pThemeAction->setData(strName);
-        if (strName == strCurrentTheme) {
-            pThemeAction->setChecked(true);
+    // 遍历所有主题 Provider，合并主题列表
+    for(const IThemeProvider* pProvider : m_pHost->themeProviders()) {
+        for(const Theme& rTheme : pProvider->themes()) {
+            QAction* pThemeAction = pThemeMenu->addAction(rTheme.strName);
+            pThemeAction->setCheckable(true);
+            pThemeAction->setData(rTheme.strName);
+            if(rTheme.strName == strCurrentTheme) {
+                pThemeAction->setChecked(true);
+            }
+            pThemeGroup->addAction(pThemeAction);
         }
-        pThemeGroup->addAction(pThemeAction);
     }
     connect(pThemeGroup, &QActionGroup::triggered, this, [this](QAction* pAction) {
         ThemeManager::setCurrentThemeName(pAction->data().toString());
         applyTheme();
     });
 
-    // 帮助菜单
+    // ---- 界面外观分组（UI 风格，与画布配色独立）----
+    pThemeMenu->addSection(QStringLiteral("界面外观"));
+    auto* pUiStyleGroup = new QActionGroup(this);
+    const QString strCurrentUiStyle = UiStyleManager::currentStyleId();
+    for(const UiStyleDescriptor& rDesc : UiStyleManager::availableStyles()) {
+        QAction* pUiStyleAction = pThemeMenu->addAction(rDesc.strDisplayName);
+        pUiStyleAction->setCheckable(true);
+        pUiStyleAction->setData(rDesc.strId);
+        if(rDesc.strId == strCurrentUiStyle) {
+            pUiStyleAction->setChecked(true);
+        }
+        pUiStyleGroup->addAction(pUiStyleAction);
+    }
+    connect(pUiStyleGroup, &QActionGroup::triggered, this, [this](QAction* pAction) {
+        UiStyleManager::setCurrentStyleId(pAction->data().toString());
+        applyUiStyle();
+    });
+
+    // ---- 帮助菜单 ----
     QMenu* pHelpMenu = menuBar()->addMenu(QStringLiteral("帮助(&H)"));
     QAction* pShortcutsAction = pHelpMenu->addAction(QStringLiteral("快捷键(&K)…"));
     connect(pShortcutsAction, &QAction::triggered, this, &MainWindow::onShowShortcuts);
@@ -422,28 +344,23 @@ void MainWindow::createToolBar()
 {
     m_pToolBar = addToolBar(QStringLiteral("插入"));
 
-    QAction* pAddImageAction = m_pToolBar->addAction(QStringLiteral("插入图片"));
-    connect(pAddImageAction, &QAction::triggered, this, &MainWindow::onAddImageComponent);
-
-    QAction* pAddTextAction = m_pToolBar->addAction(QStringLiteral("插入文本"));
-    connect(pAddTextAction, &QAction::triggered, this, &MainWindow::onAddTextComponent);
-
-    QAction* pAddTableAction = m_pToolBar->addAction(QStringLiteral("插入表格"));
-    connect(pAddTableAction, &QAction::triggered, this, &MainWindow::onAddTableComponent);
-
-    auto* pShapeCombo = new QComboBox(m_pToolBar);
-    pShapeCombo->addItem(QStringLiteral("矩形"), static_cast<int>(E_SHAPE_TYPE_RECTANGLE));
-    pShapeCombo->addItem(QStringLiteral("圆角矩形"), static_cast<int>(E_SHAPE_TYPE_ROUND_RECT));
-    pShapeCombo->addItem(QStringLiteral("椭圆"), static_cast<int>(E_SHAPE_TYPE_ELLIPSE));
-    pShapeCombo->addItem(QStringLiteral("线条"), static_cast<int>(E_SHAPE_TYPE_LINE));
-    m_pToolBar->addWidget(pShapeCombo);
-    QAction* pAddShapeAction = m_pToolBar->addAction(QStringLiteral("插入形状"));
-    connect(pAddShapeAction, &QAction::triggered, this, [this, pShapeCombo]() {
-        onAddShapeComponent(pShapeCombo->currentData().toInt());
-    });
+    // 从 PluginHost 获取前几个组件类型作为工具栏快捷按钮
+    // （图片、文本、表格；形状和贴纸通过菜单插入）
+    for(const IComponentProvider* pProvider : m_pHost->componentProviders()) {
+        // 仅添加 menuPath 为 "插入/xxx"（无第三级）的组件到工具栏
+        const QString strPath = pProvider->menuPath();
+        if(strPath.count(QLatin1Char('/')) == 1) {
+            QAction* pAction = m_pToolBar->addAction(pProvider->displayName());
+            const IComponentProvider* pCaptured = pProvider;
+            connect(pAction, &QAction::triggered, this, [this, pCaptured]() {
+                insertComponent(pCaptured);
+            });
+        }
+    }
 
     m_pToolBar->addSeparator();
 
+    // 撤销/重做
     QAction* pUndoAction = m_pUndoStack->createUndoAction(this, QStringLiteral("撤销"));
     m_pToolBar->addAction(pUndoAction);
     QAction* pRedoAction = m_pUndoStack->createRedoAction(this, QStringLiteral("重做"));
@@ -451,7 +368,7 @@ void MainWindow::createToolBar()
 
     m_pToolBar->addSeparator();
 
-    // 对齐按钮（选中多个组件时有效）
+    // 对齐按钮
     const QList<QPair<QString, int>> alignToolbar = {
         {QStringLiteral("左对齐"), E_ALIGN_LEFT},
         {QStringLiteral("水平居中"), E_ALIGN_H_CENTER},
@@ -460,7 +377,7 @@ void MainWindow::createToolBar()
         {QStringLiteral("垂直居中"), E_ALIGN_V_CENTER},
         {QStringLiteral("底对齐"), E_ALIGN_BOTTOM},
     };
-    for (const QPair<QString, int>& rAlign : alignToolbar) {
+    for(const QPair<QString, int>& rAlign : alignToolbar) {
         QAction* pAlignAction = m_pToolBar->addAction(rAlign.first);
         const int nAlign = rAlign.second;
         connect(pAlignAction, &QAction::triggered, this, [this, nAlign]() {
@@ -475,74 +392,37 @@ void MainWindow::createToolBar()
 
 void MainWindow::createCentralWidget()
 {
-    m_pProjectTree = new QTreeWidget(this);
-    m_pProjectTree->setHeaderLabel(QStringLiteral("项目结构"));
-    m_pProjectTree->setMinimumWidth(200);
-    m_pProjectTree->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(m_pProjectTree, &QTreeWidget::itemSelectionChanged,
-            this, &MainWindow::onProjectTreeSelectionChanged);
-    connect(m_pProjectTree, &QTreeWidget::customContextMenuRequested,
-            this, &MainWindow::onTreeContextMenu);
+    // ---- 项目树面板 ----
+    m_pTreePanel = new ProjectTreePanel(this, m_pProjectManager, m_pHost);
+    connect(m_pTreePanel, &ProjectTreePanel::pageSelected,
+            this, &MainWindow::onPageSelected);
+    connect(m_pTreePanel, &ProjectTreePanel::projectStructureChanged,
+            this, &MainWindow::onProjectStructureChanged);
 
+    // ---- 画布 ----
     m_pView = new CanvasView(m_pScene, this);
 
-    // 右侧标签页：素材库 + 图层
-    auto* pTabPanel = new QTabWidget(this);
+    // ---- 右侧标签页：素材库 + 图层 ----
+    m_pTabPanel = new QTabWidget(this);
 
-    // 素材库：导入按钮 + 缩略图网格，双击/右键插入到画布
-    auto* pAssetPanel = new QWidget(pTabPanel);
-    auto* pAssetLayout = new QVBoxLayout(pAssetPanel);
-    pAssetLayout->setContentsMargins(0, 0, 0, 0);
-    QPushButton* pImportButton = new QPushButton(QStringLiteral("导入素材…"), pAssetPanel);
-    connect(pImportButton, &QPushButton::clicked, this, &MainWindow::onImportAssets);
-    pAssetLayout->addWidget(pImportButton);
+    // 素材库面板
+    m_pAssetPanel = new AssetPanel(m_pTabPanel, m_pProjectManager);
+    connect(m_pAssetPanel, &AssetPanel::assetInserted,
+            this, &MainWindow::onAssetInserted);
+    m_pTabPanel->addTab(m_pAssetPanel, QStringLiteral("素材库"));
 
-    m_pAssetList = new QListWidget(pAssetPanel);
-    m_pAssetList->setViewMode(QListView::IconMode);
-    m_pAssetList->setIconSize(QSize(56, 56));
-    m_pAssetList->setResizeMode(QListView::Adjust);
-    m_pAssetList->setSpacing(4);
-    m_pAssetList->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(m_pAssetList, &QListWidget::itemDoubleClicked,
-            this, &MainWindow::onAssetDoubleClicked);
-    connect(m_pAssetList, &QListWidget::customContextMenuRequested,
-            this, &MainWindow::onAssetContextMenu);
-    pAssetLayout->addWidget(m_pAssetList);
-    pTabPanel->addTab(pAssetPanel, QStringLiteral("素材库"));
+    // 图层面板
+    m_pLayerPanel = new LayerPanel(m_pTabPanel, m_pScene, m_pView);
+    connect(m_pLayerPanel, &LayerPanel::layerChanged,
+            this, &MainWindow::syncCanvasToModel);
+    m_pTabPanel->addTab(m_pLayerPanel, QStringLiteral("图层"));
+    m_pTabPanel->setCurrentIndex(1);   // 默认显示图层
 
-    // 图层面板：列表 + 操作按钮
-    auto* pLayerPanel = new QWidget(pTabPanel);
-    auto* pLayerLayout = new QVBoxLayout(pLayerPanel);
-    pLayerLayout->setContentsMargins(0, 0, 0, 0);
-    m_pLayerList = new QListWidget(pLayerPanel);
-    m_pLayerList->setMinimumWidth(180);
-    connect(m_pLayerList, &QListWidget::itemSelectionChanged,
-            this, &MainWindow::onLayerSelectionChanged);
-    connect(m_pLayerList, &QListWidget::itemChanged,
-            this, &MainWindow::onLayerVisibilityChanged);
-    pLayerLayout->addWidget(m_pLayerList);
-
-    auto* pLayerButtons = new QHBoxLayout;
-    QPushButton* pMoveUpButton = new QPushButton(QStringLiteral("上移"), pLayerPanel);
-    QPushButton* pMoveDownButton = new QPushButton(QStringLiteral("下移"), pLayerPanel);
-    QPushButton* pToTopButton = new QPushButton(QStringLiteral("置顶"), pLayerPanel);
-    QPushButton* pToBottomButton = new QPushButton(QStringLiteral("置底"), pLayerPanel);
-    connect(pMoveUpButton, &QPushButton::clicked, this, &MainWindow::onLayerMoveUp);
-    connect(pMoveDownButton, &QPushButton::clicked, this, &MainWindow::onLayerMoveDown);
-    connect(pToTopButton, &QPushButton::clicked, this, &MainWindow::onLayerToTop);
-    connect(pToBottomButton, &QPushButton::clicked, this, &MainWindow::onLayerToBottom);
-    pLayerButtons->addWidget(pMoveUpButton);
-    pLayerButtons->addWidget(pMoveDownButton);
-    pLayerButtons->addWidget(pToTopButton);
-    pLayerButtons->addWidget(pToBottomButton);
-    pLayerLayout->addLayout(pLayerButtons);
-    pTabPanel->addTab(pLayerPanel, QStringLiteral("图层"));
-    pTabPanel->setCurrentIndex(1);   // 默认显示图层
-
+    // ---- 布局：项目树 | 画布 | 标签页 ----
     QSplitter* pSplitter = new QSplitter(Qt::Horizontal, this);
-    pSplitter->addWidget(m_pProjectTree);
+    pSplitter->addWidget(m_pTreePanel);
     pSplitter->addWidget(m_pView);
-    pSplitter->addWidget(pTabPanel);
+    pSplitter->addWidget(m_pTabPanel);
     pSplitter->setStretchFactor(1, 1);
     pSplitter->setSizes({220, 900, 220});
 
@@ -554,64 +434,46 @@ void MainWindow::createStatusBar()
     statusBar()->showMessage(QStringLiteral("就绪"));
 }
 
-void MainWindow::onNewProject()
+void MainWindow::refreshRecentProjectsMenu()
 {
-    // 新建项目向导（M1 基础版：游戏名 + 画布尺寸）
-    QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("新建项目"));
-
-    auto* pNameEdit = new QLineEdit(&dialog);
-    pNameEdit->setPlaceholderText(QStringLiteral("游戏名，如：艾尔登法环"));
-
-    auto* pSizeCombo = new QComboBox(&dialog);
-    const QSize defaultSize = Settings::defaultPageSize();
-    const QList<QPair<QString, QSize>> presets = {
-        {QStringLiteral("竖图 1080×1440（默认）"), QSize(1080, 1440)},
-        {QStringLiteral("横图 1920×1080"), QSize(1920, 1080)},
-        {QStringLiteral("方形 1080×1080"), QSize(1080, 1080)},
-        {QStringLiteral("长图 1080×2400"), QSize(1080, 2400)},
-    };
-    int nSelectedIndex = 0;
-    for (int nIndex = 0; nIndex < presets.size(); ++nIndex) {
-        pSizeCombo->addItem(presets.at(nIndex).first, presets.at(nIndex).second);
-        if (presets.at(nIndex).second == defaultSize) {
-            nSelectedIndex = nIndex;
-        }
-    }
-    pSizeCombo->setCurrentIndex(nSelectedIndex);
-
-    auto* pForm = new QFormLayout(&dialog);
-    pForm->addRow(QStringLiteral("游戏名："), pNameEdit);
-    pForm->addRow(QStringLiteral("默认画布尺寸："), pSizeCombo);
-
-    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("创建"));
-    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    pForm->addRow(pButtons);
-
-    if (dialog.exec() != QDialog::Accepted) {
+    m_pRecentProjectsMenu->clear();
+    const QStringList recents = Settings::recentProjects();
+    if(recents.isEmpty()) {
+        QAction* pEmptyAction = m_pRecentProjectsMenu->addAction(QStringLiteral("（无）"));
+        pEmptyAction->setEnabled(false);
         return;
     }
+    for(const QString& strPath : recents) {
+        QAction* pAction = m_pRecentProjectsMenu->addAction(strPath);
+        pAction->setData(strPath);
+        connect(pAction, &QAction::triggered, this, &MainWindow::onOpenRecentProject);
+    }
+}
 
-    const QString strGameName = pNameEdit->text().trimmed();
-    if (strGameName.isEmpty()) {
+// =========================================================================
+// 文件操作
+// =========================================================================
+
+void MainWindow::onNewProject()
+{
+    NewProjectDialog dialog(this);
+    if(dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    const QString strGameName = dialog.gameName();
+    if(strGameName.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("新建项目"), QStringLiteral("游戏名不能为空"));
         return;
     }
-
     const QString strParentDirectory = QFileDialog::getExistingDirectory(
         this, QStringLiteral("选择项目保存位置"));
-    if (strParentDirectory.isEmpty()) {
+    if(strParentDirectory.isEmpty()) {
         return;
     }
-
     QString strErrorMessage;
-    if (!m_pProjectManager->createProject(strGameName, pSizeCombo->currentData().toSize(),
-                                          strParentDirectory, &strErrorMessage)) {
+    if(!m_pProjectManager->createProject(strGameName, dialog.pageSize(),
+                                         strParentDirectory, &strErrorMessage)) {
         QMessageBox::critical(this, QStringLiteral("新建项目"), strErrorMessage);
-        return;
     }
     // 保存成功后的界面刷新由 projectOpened 信号统一处理
 }
@@ -621,7 +483,7 @@ void MainWindow::onOpenProject()
     const QString strJsonPath = QFileDialog::getOpenFileName(
         this, QStringLiteral("打开项目"), QString(),
         QStringLiteral("攻略项目 (project.json)"));
-    if (strJsonPath.isEmpty()) {
+    if(strJsonPath.isEmpty()) {
         return;
     }
     openProjectPath(strJsonPath);
@@ -629,23 +491,23 @@ void MainWindow::onOpenProject()
 
 void MainWindow::onOpenRecentProject()
 {
-    if (QAction* pAction = qobject_cast<QAction*>(sender())) {
+    if(QAction* pAction = qobject_cast<QAction*>(sender())) {
         openProjectPath(pAction->data().toString());
     }
 }
 
 void MainWindow::onSaveProject()
 {
-    if (!m_pProjectManager->hasProject()) {
+    if(!m_pProjectManager->hasProject()) {
         statusBar()->showMessage(QStringLiteral("当前没有打开的项目"), 3000);
         return;
     }
     // 保存前先同步画布到模型，保证未触发自动保存的编辑也落盘
     syncCanvasToModel();
     QString strErrorMessage;
-    if (m_pProjectManager->save(&strErrorMessage)) {
+    if(m_pProjectManager->save(&strErrorMessage)) {
         statusBar()->showMessage(QStringLiteral("已保存"), 3000);
-        updateWindowTitle();   // 清除标题脏标记 *
+        updateWindowTitle();
     } else {
         QMessageBox::critical(this, QStringLiteral("保存"), strErrorMessage);
     }
@@ -653,10 +515,10 @@ void MainWindow::onSaveProject()
 
 void MainWindow::closeEvent(QCloseEvent* pEvent)
 {
-    // 记住窗口状态（无论是否关闭成功）
+    // 记住窗口状态
     Settings::setWindowGeometry(saveGeometry());
 
-    if (m_pProjectManager->hasProject() && m_pProjectManager->isDirty()) {
+    if(m_pProjectManager->hasProject() && m_pProjectManager->isDirty()) {
         QMessageBox box(this);
         box.setWindowTitle(QStringLiteral("未保存的更改"));
         box.setIcon(QMessageBox::Question);
@@ -669,19 +531,19 @@ void MainWindow::closeEvent(QCloseEvent* pEvent)
         box.exec();
 
         const QAbstractButton* pClicked = box.clickedButton();
-        if (pClicked == pSaveButton) {
+        if(pClicked == pSaveButton) {
             syncCanvasToModel();
             QString strErrorMessage;
-            if (!m_pProjectManager->save(&strErrorMessage)) {
+            if(!m_pProjectManager->save(&strErrorMessage)) {
                 QMessageBox::critical(this, QStringLiteral("保存失败"), strErrorMessage);
-                pEvent->ignore();   // 保存失败，阻止关闭
+                pEvent->ignore();
                 return;
             }
             pEvent->accept();
-        } else if (pClicked == pCancelButton) {
-            pEvent->ignore();       // 取消关闭
+        } else if(pClicked == pCancelButton) {
+            pEvent->ignore();
         } else {
-            pEvent->accept();       // 不保存直接关闭
+            pEvent->accept();
         }
         return;
     }
@@ -690,201 +552,19 @@ void MainWindow::closeEvent(QCloseEvent* pEvent)
 
 void MainWindow::onExportPng()
 {
-    if (!m_pProjectManager->hasProject()) {
+    if(!m_pProjectManager->hasProject()) {
         statusBar()->showMessage(QStringLiteral("请先打开项目"), 3000);
         return;
     }
-    Page* pCurrentPage = currentPage();
-    if (!pCurrentPage) {
-        QMessageBox::information(this, QStringLiteral("导出 PNG"),
-                                 QStringLiteral("请先在左侧选择要导出的页面"));
-        return;
-    }
-
-    QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("导出 PNG"));
-    auto* pFormLayout = new QFormLayout(&dialog);
-
-    // 导出范围
-    auto* pTargetGroup = new QGroupBox(QStringLiteral("导出范围"), &dialog);
-    auto* pTargetLayout = new QVBoxLayout(pTargetGroup);
-    auto* pRadioCurrentPage = new QRadioButton(QStringLiteral("当前页"), pTargetGroup);
-    auto* pRadioWalkthrough = new QRadioButton(QStringLiteral("当前攻略全部页"), pTargetGroup);
-    pRadioCurrentPage->setChecked(true);
-    pTargetLayout->addWidget(pRadioCurrentPage);
-    pTargetLayout->addWidget(pRadioWalkthrough);
-    pFormLayout->addRow(pTargetGroup);
-
-    // 导出形态
-    auto* pModeGroup = new QGroupBox(QStringLiteral("导出形态"), &dialog);
-    auto* pModeLayout = new QVBoxLayout(pModeGroup);
-    auto* pRadioSeparate = new QRadioButton(QStringLiteral("逐页 PNG"), pModeGroup);
-    auto* pRadioLong = new QRadioButton(QStringLiteral("长图（纵向拼接）"), pModeGroup);
-    auto* pSeparatorCheck = new QCheckBox(QStringLiteral("页间分隔线（长图）"), pModeGroup);
-    pRadioSeparate->setChecked(true);
-    pSeparatorCheck->setEnabled(false);
-    connect(pRadioLong, &QRadioButton::toggled, pSeparatorCheck, &QCheckBox::setEnabled);
-    pModeLayout->addWidget(pRadioSeparate);
-    pModeLayout->addWidget(pRadioLong);
-    pModeLayout->addWidget(pSeparatorCheck);
-    pFormLayout->addRow(pModeGroup);
-
-    // 范围选"当前页"时形态无意义（一页长图与单页相同），冻结形态选择；选"全部页"时启用
-    pModeGroup->setEnabled(false);
-    connect(pRadioCurrentPage, &QRadioButton::toggled, pModeGroup, [pModeGroup](bool bCurrentPage) {
-        pModeGroup->setEnabled(!bCurrentPage);
-    });
-
-    // 倍率
-    auto* pScaleCombo = new QComboBox(&dialog);
-    pScaleCombo->addItem(QStringLiteral("1x（原尺寸）"), 1.0);
-    pScaleCombo->addItem(QStringLiteral("2x（推荐，抗平台压缩）"), 2.0);
-    pScaleCombo->addItem(QStringLiteral("3x"), 3.0);
-    pScaleCombo->setCurrentIndex(1);
-    pFormLayout->addRow(QStringLiteral("分辨率倍率："), pScaleCombo);
-
-    // 作者署名选项
-    auto* pAuthorCheck = new QCheckBox(&dialog);
-    const QString strAuthorName = Settings::authorName();
-    if (strAuthorName.trimmed().isEmpty()) {
-        pAuthorCheck->setText(QStringLiteral("添加作者署名（请先在 文件→设置 中填写）"));
-        pAuthorCheck->setEnabled(false);
-    } else {
-        pAuthorCheck->setText(QStringLiteral("添加作者署名（by %1）").arg(strAuthorName));
-        pAuthorCheck->setChecked(true);
-    }
-    pFormLayout->addRow(pAuthorCheck);
-
-    // 导出目录
-    auto* pDirEdit = new QLineEdit(&dialog);
-    pDirEdit->setPlaceholderText(QStringLiteral("选择导出目录…"));
-    auto* pBrowseButton = new QPushButton(QStringLiteral("浏览…"), &dialog);
-    connect(pBrowseButton, &QPushButton::clicked, &dialog, [pDirEdit]() {
-        const QString strDir = QFileDialog::getExistingDirectory(nullptr, QStringLiteral("选择导出目录"));
-        if (!strDir.isEmpty()) {
-            pDirEdit->setText(strDir);
-        }
-    });
-    auto* pDirRow = new QHBoxLayout;
-    pDirRow->addWidget(pDirEdit);
-    pDirRow->addWidget(pBrowseButton);
-    pFormLayout->addRow(QStringLiteral("导出到："), pDirRow);
-
-    auto* pHintLabel = new QLabel(
-        QStringLiteral("提示：长图会把所选范围内的页面纵向拼接；若范围只有一个页面，长图与逐页导出结果相同。"), &dialog);
-    pHintLabel->setWordWrap(true);
-    pFormLayout->addRow(pHintLabel);
-
-    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("导出"));
-    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    pFormLayout->addRow(pButtons);
-
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-
-    const QString strExportDir = pDirEdit->text().trimmed();
-    if (strExportDir.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("导出 PNG"), QStringLiteral("请选择导出目录"));
-        return;
-    }
-
-    // 收集导出页面与攻略标题
-    Project* pProject = m_pProjectManager->project();
-    QVector<Page> vecPages;
-    QString strWalkthroughTitle;
-    if (pRadioCurrentPage->isChecked()) {
-        vecPages.append(*pCurrentPage);
-        const QString strKey = selectedPageKey();
-        const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
-        if (nWalkthroughIndex >= 0 && nWalkthroughIndex < pProject->vecWalkthroughs.size()) {
-            strWalkthroughTitle = pProject->vecWalkthroughs.at(nWalkthroughIndex).strTitle;
-        }
-    } else {
-        const QString strKey = selectedPageKey();
-        const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
-        if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
-            return;
-        }
-        const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
-        strWalkthroughTitle = rWalkthrough.strTitle;
-        vecPages = rWalkthrough.vecPages;
-    }
-    if (vecPages.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("导出 PNG"), QStringLiteral("没有可导出的页面"));
-        return;
-    }
-
-    // 文件名净化：去掉 Windows 非法字符
-    QString strSafeTitle = strWalkthroughTitle;
-    strSafeTitle.replace(QRegularExpression(QStringLiteral(R"([\\/:*?"<>|])")), QStringLiteral("_"));
-    if (strSafeTitle.trimmed().isEmpty()) {
-        strSafeTitle = QStringLiteral("攻略");
-    }
-
-    const qreal dScale = pScaleCombo->currentData().toDouble();
-    const bool bLongImage = pRadioLong->isChecked();
-    const bool bSeparator = pSeparatorCheck->isChecked();
-    const QString strDirPath = QDir::cleanPath(strExportDir);
-    const QString strAuthor = pAuthorCheck->isChecked() ? Settings::authorName() : QString();
-
-    if (bLongImage) {
-        QString strErrorMessage;
-        const QImage image = ExportRenderer::renderLongImage(
-            vecPages, dScale, bSeparator, &strErrorMessage,
-            ThemeManager::currentTheme().backgroundColor, strAuthor);
-        if (image.isNull()) {
-            QMessageBox::critical(this, QStringLiteral("导出 PNG"), strErrorMessage);
-            return;
-        }
-        QProgressDialog progress(QStringLiteral("正在导出长图…"), QString(), 0, 1, this);
-        progress.setWindowModality(Qt::WindowModal);
-        progress.setValue(0);
-        const QString strFilePath = QDir(strDirPath).filePath(strSafeTitle + QStringLiteral("_长图.png"));
-        QString strWriteError;
-        if (!ExportRenderer::writePng(image, strFilePath, &strWriteError)) {
-            QMessageBox::critical(this, QStringLiteral("导出 PNG"), strWriteError);
-            return;
-        }
-        progress.setValue(1);
-        showExportResult(this, 1, strDirPath);
-        return;
-    }
-
-    // 逐页导出
-    QProgressDialog progress(QStringLiteral("正在导出…"), QString(), 0, vecPages.size(), this);
-    progress.setWindowModality(Qt::WindowModal);
-    int nExported = 0;
-    for (int nIndex = 0; nIndex < vecPages.size(); ++nIndex) {
-        progress.setValue(nIndex);
-        if (progress.wasCanceled()) {
-            break;
-        }
-        const QImage image = ExportRenderer::renderPage(vecPages.at(nIndex), dScale,
-                                                        ThemeManager::currentTheme().backgroundColor,
-                                                        strAuthor);
-        const QString strFileName = QStringLiteral("%1_%2.png")
-                                        .arg(strSafeTitle)
-                                        .arg(nIndex + 1, 2, 10, QLatin1Char('0'));
-        if (ExportRenderer::writePng(image, QDir(strDirPath).filePath(strFileName), nullptr)) {
-            ++nExported;
-        }
-    }
-    progress.setValue(vecPages.size());
-    if (nExported > 0) {
-        showExportResult(this, nExported, strDirPath);
-    } else {
-        statusBar()->showMessage(QStringLiteral("导出失败，请检查目录权限"), 5000);
-    }
+    ExportDialog dialog(this, m_pProjectManager, m_pHost, makeContext());
+    dialog.setCurrentPageKey(m_pTreePanel->selectedPageKey());
+    dialog.exec();
 }
 
 void MainWindow::onCopyPageToClipboard()
 {
     Page* pPage = currentPage();
-    if (!pPage) {
+    if(!pPage) {
         statusBar()->showMessage(QStringLiteral("请先在左侧选择要复制的页面"), 3000);
         return;
     }
@@ -896,58 +576,11 @@ void MainWindow::onCopyPageToClipboard()
 
 void MainWindow::onShowSettings()
 {
-    QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("设置"));
-    auto* pFormLayout = new QFormLayout(&dialog);
-
-    // 默认画布尺寸
-    auto* pSizeCombo = new QComboBox(&dialog);
-    const QList<QPair<QString, QSize>> presets = {
-        {QStringLiteral("竖图 1080×1440"), QSize(1080, 1440)},
-        {QStringLiteral("横图 1920×1080"), QSize(1920, 1080)},
-        {QStringLiteral("方形 1080×1080"), QSize(1080, 1080)},
-        {QStringLiteral("长图 1080×2400"), QSize(1080, 2400)},
-    };
-    const QSize currentSize = Settings::defaultPageSize();
-    int nCurrentIndex = 0;
-    for (int nIndex = 0; nIndex < presets.size(); ++nIndex) {
-        pSizeCombo->addItem(presets.at(nIndex).first, presets.at(nIndex).second);
-        if (presets.at(nIndex).second == currentSize) {
-            nCurrentIndex = nIndex;
-        }
+    SettingsDialog dialog(this, m_pProjectManager);
+    if(dialog.exec() == QDialog::Accepted) {
+        dialog.applySettings();
+        statusBar()->showMessage(QStringLiteral("设置已保存"), 3000);
     }
-    pSizeCombo->setCurrentIndex(nCurrentIndex);
-    pFormLayout->addRow(QStringLiteral("默认画布尺寸："), pSizeCombo);
-
-    // 自动保存间隔（分钟）
-    auto* pAutoSaveSpin = new QSpinBox(&dialog);
-    pAutoSaveSpin->setRange(1, 60);
-    pAutoSaveSpin->setValue(qMax(1, Settings::autoSaveIntervalMs() / 60000));
-    pFormLayout->addRow(QStringLiteral("自动保存间隔（分钟）："), pAutoSaveSpin);
-
-    // 作者署名
-    auto* pAuthorEdit = new QLineEdit(&dialog);
-    pAuthorEdit->setPlaceholderText(QStringLiteral("如小黑盒 ID"));
-    pAuthorEdit->setText(Settings::authorName());
-    pFormLayout->addRow(QStringLiteral("作者署名："), pAuthorEdit);
-
-    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确定"));
-    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    pFormLayout->addRow(pButtons);
-
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-    Settings::setDefaultPageSize(pSizeCombo->currentData().toSize());
-    Settings::setAutoSaveIntervalMs(pAutoSaveSpin->value() * 60000);
-    Settings::setAuthorName(pAuthorEdit->text().trimmed());
-    if (m_pProjectManager->hasProject()) {
-        m_pProjectManager->setAutoSaveIntervalMs(Settings::autoSaveIntervalMs());
-    }
-    statusBar()->showMessage(QStringLiteral("设置已保存"), 3000);
 }
 
 void MainWindow::onShowShortcuts()
@@ -980,7 +613,7 @@ void MainWindow::onShowAbout()
                            "版本 %1\n\n"
                            "面向游戏攻略作者的桌面设计工具：\n"
                            "用模板 + 自由画布制作攻略配图，导出 PNG 发布到小黑盒等平台。")
-                           .arg(QCoreApplication::applicationVersion()));
+                       .arg(QCoreApplication::applicationVersion()));
 }
 
 void MainWindow::onToggleAutoSave(bool bEnabled)
@@ -993,22 +626,22 @@ void MainWindow::onToggleAutoSave(bool bEnabled)
 void MainWindow::openProjectPath(const QString& strJsonPath)
 {
     QString strErrorMessage;
-    if (!m_pProjectManager->openProject(strJsonPath, &strErrorMessage)) {
+    if(!m_pProjectManager->openProject(strJsonPath, &strErrorMessage)) {
         QMessageBox::critical(this, QStringLiteral("打开项目"), strErrorMessage);
         return;
     }
     // 崩溃恢复：打开后检测未完成保存的残留 .tmp，提示恢复
     const QString strProjectDir = m_pProjectManager->projectDirectory();
-    if (ProjectManager::hasRecoverableSnapshot(strProjectDir)) {
+    if(ProjectManager::hasRecoverableSnapshot(strProjectDir)) {
         const QMessageBox::StandardButton result = QMessageBox::question(
             this, QStringLiteral("检测到未完成的保存"),
             QStringLiteral("上次保存可能被中断，是否恢复最近一次保存的内容？"),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
-        if (result == QMessageBox::Yes) {
+        if(result == QMessageBox::Yes) {
             QString strRecoverError;
-            if (m_pProjectManager->recoverFromSnapshot(&strRecoverError)) {
+            if(m_pProjectManager->recoverFromSnapshot(&strRecoverError)) {
                 QString strReopenError;
-                if (m_pProjectManager->openProject(strJsonPath, &strReopenError)) {
+                if(m_pProjectManager->openProject(strJsonPath, &strReopenError)) {
                     statusBar()->showMessage(QStringLiteral("已从上次未完成的保存恢复"), 5000);
                 }
             } else {
@@ -1018,34 +651,18 @@ void MainWindow::openProjectPath(const QString& strJsonPath)
     }
 }
 
-void MainWindow::refreshRecentProjectsMenu()
-{
-    m_pRecentProjectsMenu->clear();
-    const QStringList recents = Settings::recentProjects();
-    if (recents.isEmpty()) {
-        QAction* pEmptyAction = m_pRecentProjectsMenu->addAction(QStringLiteral("（无）"));
-        pEmptyAction->setEnabled(false);
-        return;
-    }
-    for (const QString& strPath : recents) {
-        QAction* pAction = m_pRecentProjectsMenu->addAction(strPath);
-        pAction->setData(strPath);
-        connect(pAction, &QAction::triggered, this, &MainWindow::onOpenRecentProject);
-    }
-}
-
 void MainWindow::onProjectOpened()
 {
-    rebuildProjectTree();
+    m_pTreePanel->rebuildProjectTree();
     refreshRecentProjectsMenu();
-    refreshAssetList();
+    m_pAssetPanel->refreshAssetList();
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("已打开项目：%1").arg(m_pProjectManager->projectDirectory()), 5000);
     // 自动选中第一个攻略的首页，打开项目即有画面
     const Project* pProject = m_pProjectManager->project();
-    if (pProject && !pProject->vecWalkthroughs.isEmpty()
-        && !pProject->vecWalkthroughs.first().vecPages.isEmpty()) {
-        selectNodeByKey(QStringLiteral("0:0"));
+    if(pProject && !pProject->vecWalkthroughs.isEmpty()
+       && !pProject->vecWalkthroughs.first().vecPages.isEmpty()) {
+        m_pTreePanel->selectNodeByKey(QStringLiteral("0:0"));
     }
 }
 
@@ -1055,480 +672,66 @@ void MainWindow::onAutoSavePerformed(bool bOk, const QString& strMessage)
     updateWindowTitle();
 }
 
-void MainWindow::rebuildProjectTree()
+// =========================================================================
+// 项目树信号处理
+// =========================================================================
+
+void MainWindow::onPageSelected(const QString& rPageKey)
 {
-    m_pProjectTree->clear();
-    m_mapNodeKeys.clear();
-
-    if (!m_pProjectManager->hasProject()) {
-        return;
-    }
-
-    const Project* pProject = m_pProjectManager->project();
-    auto* pRootItem = new QTreeWidgetItem(m_pProjectTree);
-    pRootItem->setText(0, pProject->strName);
-    m_mapNodeKeys.insert(pRootItem, QString());
-
-    for (int nWalkthrough = 0; nWalkthrough < pProject->vecWalkthroughs.size(); ++nWalkthrough) {
-        const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthrough);
-        auto* pWalkthroughItem = new QTreeWidgetItem(pRootItem);
-        pWalkthroughItem->setText(0, QStringLiteral("%1（%2）")
-                                         .arg(rWalkthrough.strTitle,
-                                              walkthroughTypeToString(rWalkthrough.eType)));
-        m_mapNodeKeys.insert(pWalkthroughItem, QString::number(nWalkthrough));
-
-        for (int nPage = 0; nPage < rWalkthrough.vecPages.size(); ++nPage) {
-            auto* pPageItem = new QTreeWidgetItem(pWalkthroughItem);
-            pPageItem->setText(0, rWalkthrough.vecPages.at(nPage).strName);
-            m_mapNodeKeys.insert(pPageItem, QStringLiteral("%1:%2").arg(nWalkthrough).arg(nPage));
-        }
-    }
-    m_pProjectTree->expandAll();
+    (void)rPageKey;
+    updateCanvasEditor();
 }
 
-QString MainWindow::selectedPageKey() const
+void MainWindow::onProjectStructureChanged()
 {
-    const QList<QTreeWidgetItem*> selected = m_pProjectTree->selectedItems();
-    if (selected.isEmpty()) {
-        return QString();
-    }
-    const QString strKey = m_mapNodeKeys.value(selected.first());
-    // 仅页面节点（含冒号）才驱动画布
-    return strKey.contains(QLatin1Char(':')) ? strKey : QString();
-}
-
-QString MainWindow::selectedNodeKey() const
-{
-    const QList<QTreeWidgetItem*> selected = m_pProjectTree->selectedItems();
-    if (selected.isEmpty()) {
-        return QString();
-    }
-    return m_mapNodeKeys.value(selected.first());
-}
-
-void MainWindow::selectNodeByKey(const QString& rKey)
-{
-    for (auto it = m_mapNodeKeys.constBegin(); it != m_mapNodeKeys.constEnd(); ++it) {
-        if (it.value() == rKey) {
-            m_pProjectTree->setCurrentItem(it.key());
-            return;
-        }
-    }
-}
-
-void MainWindow::onTreeContextMenu(const QPoint& rPos)
-{
-    QTreeWidgetItem* pItem = m_pProjectTree->itemAt(rPos);
-    if (!pItem) {
-        return;
-    }
-    m_pProjectTree->setCurrentItem(pItem);
-    const QString strKey = m_mapNodeKeys.value(pItem);
-
-    QMenu menu(this);
-    QAction* pAddWalkthroughAction = nullptr;
-    QAction* pAddPageAction = nullptr;
-    QAction* pRenameAction = nullptr;
-    QAction* pDeleteAction = nullptr;
-    if (strKey.isEmpty()) {
-        // 项目节点
-        pAddWalkthroughAction = menu.addAction(QStringLiteral("新建攻略…"));
-    } else if (!strKey.contains(QLatin1Char(':'))) {
-        // 攻略节点
-        pAddPageAction = menu.addAction(QStringLiteral("新建页面…"));
-        menu.addSeparator();
-        pRenameAction = menu.addAction(QStringLiteral("重命名攻略…"));
-        pDeleteAction = menu.addAction(QStringLiteral("删除攻略…"));
-    } else {
-        // 页面节点
-        pRenameAction = menu.addAction(QStringLiteral("重命名页面…"));
-        pDeleteAction = menu.addAction(QStringLiteral("删除页面…"));
-    }
-    QAction* pChosen = menu.exec(m_pProjectTree->viewport()->mapToGlobal(rPos));
-    if (!pChosen) {
-        return;
-    }
-    if (pChosen == pAddWalkthroughAction) {
-        onAddWalkthrough();
-    } else if (pChosen == pAddPageAction) {
-        onAddPage();
-    } else if (pChosen == pRenameAction) {
-        onRenameNode();
-    } else if (pChosen == pDeleteAction) {
-        onDeleteNode();
-    }
-}
-
-void MainWindow::onAddWalkthrough()
-{
-    Project* pProject = m_pProjectManager->project();
-    if (!pProject) {
-        return;
-    }
-    const QString strProjectDir = m_pProjectManager->projectDirectory();
-
-    // 模板选择对话框：内置 + 项目用户模板 + 空白
-    QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("新建攻略 - 选择模板"));
-    dialog.resize(420, 380);
-    auto* pDialogLayout = new QVBoxLayout(&dialog);
-    auto* pTemplateList = new QListWidget(&dialog);
-    QVector<Template> vecTemplates = TemplateManager::allTemplates(strProjectDir);
-    for (const Template& rTemplate : vecTemplates) {
-        auto* pItem = new QListWidgetItem(QStringLiteral("%1（%2 页）")
-                                              .arg(rTemplate.strName).arg(rTemplate.vecPages.size()));
-        pItem->setToolTip(rTemplate.strDescription);
-        pItem->setData(Qt::UserRole, rTemplate.strName);
-        pTemplateList->addItem(pItem);
-    }
-    auto* pBlankItem = new QListWidgetItem(QStringLiteral("空白模板（1 页）"));
-    pBlankItem->setToolTip(QStringLiteral("从空白页开始，自行排版"));
-    pBlankItem->setData(Qt::UserRole, QString());
-    pTemplateList->addItem(pBlankItem);
-    pTemplateList->setCurrentRow(0);
-    pDialogLayout->addWidget(pTemplateList);
-
-    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("创建"));
-    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    pDialogLayout->addWidget(pButtons);
-
-    if (dialog.exec() != QDialog::Accepted || !pTemplateList->currentItem()) {
-        return;
-    }
-    const QString strChosenName = pTemplateList->currentItem()->data(Qt::UserRole).toString();
-
-    Walkthrough walkthrough;
-    walkthrough.strTitle = QStringLiteral("攻略 %1").arg(pProject->vecWalkthroughs.size() + 1);
-    if (strChosenName.isEmpty()) {
-        // 空白模板
-        walkthrough.eType = E_WALKTHROUGH_TYPE_COVER;
-        Page page;
-        page.strName = QStringLiteral("页面 1");
-        page.size = Settings::defaultPageSize();
-        walkthrough.vecPages.append(page);
-    } else {
-        // 应用选中模板：复制全部页面，并重新生成组件 id 避免重复
-        for (const Template& rTemplate : vecTemplates) {
-            if (rTemplate.strName == strChosenName) {
-                walkthrough.eType = rTemplate.eType;
-                walkthrough.vecPages = rTemplate.vecPages;
-                for (Page& rPage : walkthrough.vecPages) {
-                    for (Component& rComponent : rPage.vecComponents) {
-                        rComponent.strId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-                    }
-                }
-                break;
-            }
-        }
-    }
-
-    pProject->vecWalkthroughs.append(walkthrough);
-    m_pProjectManager->setDirty();
-    rebuildProjectTree();
-    updateWindowTitle();
-    selectNodeByKey(QString::number(pProject->vecWalkthroughs.size() - 1));
-}
-
-void MainWindow::onAddPage()
-{
-    Project* pProject = m_pProjectManager->project();
-    if (!pProject) {
-        return;
-    }
-    const QString strKey = selectedNodeKey();
-    if (strKey.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("请先选中一个攻略"), 3000);
-        return;
-    }
-    const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
-    if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
-        return;
-    }
-    Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
-
-    // 新建页面：选择本页画布尺寸
-    QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("新建页面"));
-    auto* pFormLayout = new QFormLayout(&dialog);
-    auto* pSizeCombo = new QComboBox(&dialog);
-    const QList<QPair<QString, QSize>> presets = {
-        {QStringLiteral("竖图 1080×1440（推荐）"), QSize(1080, 1440)},
-        {QStringLiteral("横图 1920×1080"), QSize(1920, 1080)},
-        {QStringLiteral("方形 1080×1080"), QSize(1080, 1080)},
-        {QStringLiteral("长图 1080×2400"), QSize(1080, 2400)},
-    };
-    // 默认选中：该攻略已有页面的尺寸，否则全局默认
-    QSize defaultSize = rWalkthrough.vecPages.isEmpty()
-        ? Settings::defaultPageSize()
-        : rWalkthrough.vecPages.first().size;
-    int nDefaultIndex = 0;
-    for (int nIndex = 0; nIndex < presets.size(); ++nIndex) {
-        pSizeCombo->addItem(presets.at(nIndex).first, presets.at(nIndex).second);
-        if (presets.at(nIndex).second == defaultSize) {
-            nDefaultIndex = nIndex;
-        }
-    }
-    pSizeCombo->setCurrentIndex(nDefaultIndex);
-    pFormLayout->addRow(QStringLiteral("页面尺寸："), pSizeCombo);
-
-    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("创建"));
-    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    pFormLayout->addRow(pButtons);
-
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-
-    Page page;
-    page.strName = QStringLiteral("页面 %1").arg(rWalkthrough.vecPages.size() + 1);
-    page.size = pSizeCombo->currentData().toSize();
-    rWalkthrough.vecPages.append(page);
-    m_pProjectManager->setDirty();
-    rebuildProjectTree();
-    updateWindowTitle();
-    selectNodeByKey(QStringLiteral("%1:%2").arg(nWalkthroughIndex).arg(rWalkthrough.vecPages.size() - 1));
-}
-
-void MainWindow::onRenameNode()
-{
-    Project* pProject = m_pProjectManager->project();
-    if (!pProject) {
-        return;
-    }
-    const QString strKey = selectedNodeKey();
-    QString strOldName;
-    if (strKey.isEmpty()) {
-        strOldName = pProject->strName;
-    } else {
-        const QStringList parts = strKey.split(QLatin1Char(':'));
-        const int nWalkthroughIndex = parts.at(0).toInt();
-        if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
-            return;
-        }
-        if (parts.size() == 1) {
-            strOldName = pProject->vecWalkthroughs.at(nWalkthroughIndex).strTitle;
-        } else {
-            const int nPageIndex = parts.at(1).toInt();
-            const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
-            if (nPageIndex < 0 || nPageIndex >= rWalkthrough.vecPages.size()) {
-                return;
-            }
-            strOldName = rWalkthrough.vecPages.at(nPageIndex).strName;
-        }
-    }
-    bool bOk = false;
-    const QString strNewName = QInputDialog::getText(this, QStringLiteral("重命名"),
-                                                     QStringLiteral("新名称："),
-                                                     QLineEdit::Normal, strOldName, &bOk);
-    if (!bOk || strNewName.trimmed().isEmpty() || strNewName == strOldName) {
-        return;
-    }
-    if (strKey.isEmpty()) {
-        pProject->strName = strNewName.trimmed();
-    } else {
-        const QStringList parts = strKey.split(QLatin1Char(':'));
-        const int nWalkthroughIndex = parts.at(0).toInt();
-        if (parts.size() == 1) {
-            pProject->vecWalkthroughs[nWalkthroughIndex].strTitle = strNewName.trimmed();
-        } else {
-            const int nPageIndex = parts.at(1).toInt();
-            pProject->vecWalkthroughs[nWalkthroughIndex].vecPages[nPageIndex].strName = strNewName.trimmed();
-        }
-    }
-    m_pProjectManager->setDirty();
-    rebuildProjectTree();
-    updateWindowTitle();
-    selectNodeByKey(strKey);
-}
-
-void MainWindow::onDeleteNode()
-{
-    Project* pProject = m_pProjectManager->project();
-    if (!pProject) {
-        return;
-    }
-    const QString strKey = selectedNodeKey();
-    if (strKey.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("项目节点不可删除"), 3000);
-        return;
-    }
-    const QStringList parts = strKey.split(QLatin1Char(':'));
-    const int nWalkthroughIndex = parts.at(0).toInt();
-    if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
-        return;
-    }
-    QString strConfirm;
-    if (parts.size() == 1) {
-        strConfirm = QStringLiteral("确定删除攻略「%1」及其全部页面？")
-                         .arg(pProject->vecWalkthroughs.at(nWalkthroughIndex).strTitle);
-    } else {
-        const int nPageIndex = parts.at(1).toInt();
-        const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
-        if (nPageIndex < 0 || nPageIndex >= rWalkthrough.vecPages.size()) {
-            return;
-        }
-        strConfirm = QStringLiteral("确定删除页面「%1」？")
-                         .arg(rWalkthrough.vecPages.at(nPageIndex).strName);
-    }
-    if (QMessageBox::question(this, QStringLiteral("删除"), strConfirm,
-                              QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
-        return;
-    }
-    if (parts.size() == 1) {
-        pProject->vecWalkthroughs.removeAt(nWalkthroughIndex);
-    } else {
-        pProject->vecWalkthroughs[nWalkthroughIndex].vecPages.removeAt(parts.at(1).toInt());
-    }
-    m_pProjectManager->setDirty();
-    rebuildProjectTree();
-    updateCanvasEditor();   // 若删除的是当前显示页面，画布同步清空
+    updateCanvasEditor();
     updateWindowTitle();
 }
 
-void MainWindow::onSaveAsTemplate()
+// =========================================================================
+// 画布与模型同步
+// =========================================================================
+
+void MainWindow::updateCanvasEditor()
 {
-    Project* pProject = m_pProjectManager->project();
-    if (!pProject) {
+    Page* pPage = currentPage();
+    if(!pPage) {
+        m_pScene->clearPage();
         return;
     }
-    const QString strKey = selectedNodeKey();
-    if (strKey.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("请先选中一个攻略"), 3000);
+    m_bSyncingCanvas = true;
+    m_pScene->loadPage(*pPage);
+    m_bSyncingCanvas = false;
+    m_pView->fitInView(m_pScene->sceneRect(), Qt::KeepAspectRatio);
+    m_pView->centerOn(m_pScene->sceneRect().center());
+    m_pLayerPanel->refreshLayerList();
+}
+
+void MainWindow::syncCanvasToModel()
+{
+    if(m_bSyncingCanvas) {
         return;
     }
-    const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
-    if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
-        return;
-    }
-    const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
-    if (rWalkthrough.vecPages.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("保存为模板"), QStringLiteral("该攻略没有页面，无法保存为模板"));
-        return;
-    }
-    bool bOk = false;
-    const QString strTemplateName = QInputDialog::getText(
-        this, QStringLiteral("保存为模板"), QStringLiteral("模板名称："),
-        QLineEdit::Normal, rWalkthrough.strTitle, &bOk);
-    if (!bOk || strTemplateName.trimmed().isEmpty()) {
-        return;
-    }
-    Template t;
-    t.strName = strTemplateName.trimmed();
-    t.eType = rWalkthrough.eType;
-    t.strDescription = QStringLiteral("由攻略「%1」保存").arg(rWalkthrough.strTitle);
-    t.vecPages = rWalkthrough.vecPages;
-    QString strErrorMessage;
-    if (TemplateManager::saveTemplate(t, m_pProjectManager->projectDirectory(), &strErrorMessage)) {
-        statusBar()->showMessage(QStringLiteral("模板「%1」已保存").arg(t.strName), 4000);
-    } else {
-        QMessageBox::critical(this, QStringLiteral("保存为模板"), strErrorMessage);
+    Page* pPage = currentPage();
+    if(pPage) {
+        m_pScene->syncToModel(pPage);
+        m_pProjectManager->setDirty();
+        updateWindowTitle();
     }
 }
 
-void MainWindow::onImportTemplate()
+void MainWindow::onCanvasComponentsChanged()
 {
-    if (!m_pProjectManager->hasProject()) {
-        statusBar()->showMessage(QStringLiteral("请先打开项目"), 3000);
-        return;
-    }
-    const QString strJsonPath = QFileDialog::getOpenFileName(
-        this, QStringLiteral("导入模板"), QString(), QStringLiteral("攻略模板 (*.json)"));
-    if (strJsonPath.isEmpty()) {
-        return;
-    }
-    QString strErrorMessage;
-    if (TemplateManager::importTemplate(strJsonPath, m_pProjectManager->projectDirectory(),
-                                        &strErrorMessage)) {
-        statusBar()->showMessage(QStringLiteral("模板已导入"), 4000);
-    } else {
-        QMessageBox::critical(this, QStringLiteral("导入模板"), strErrorMessage);
-    }
+    syncCanvasToModel();
+    m_pLayerPanel->refreshLayerList();
 }
 
-void MainWindow::onExportTemplate()
+void MainWindow::onCanvasSelectionChanged()
 {
-    Project* pProject = m_pProjectManager->project();
-    if (!pProject) {
+    if(m_bSyncingCanvas) {
         return;
     }
-    const QString strKey = selectedNodeKey();
-    if (strKey.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("请先选中一个攻略"), 3000);
-        return;
-    }
-    const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
-    if (nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
-        return;
-    }
-    const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
-    if (rWalkthrough.vecPages.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("导出模板"), QStringLiteral("该攻略没有页面，无法导出"));
-        return;
-    }
-    QString strSafeName = rWalkthrough.strTitle;
-    strSafeName.replace(QRegularExpression(QStringLiteral(R"([\\/:*?"<>|])")), QStringLiteral("_"));
-    const QString strDestPath = QFileDialog::getSaveFileName(
-        this, QStringLiteral("导出模板"), strSafeName + QStringLiteral(".json"),
-        QStringLiteral("攻略模板 (*.json)"));
-    if (strDestPath.isEmpty()) {
-        return;
-    }
-    Template t;
-    t.strName = rWalkthrough.strTitle;
-    t.eType = rWalkthrough.eType;
-    t.vecPages = rWalkthrough.vecPages;
-    QString strErrorMessage;
-    if (TemplateSerializer::writeFile(t, strDestPath, &strErrorMessage)) {
-        statusBar()->showMessage(QStringLiteral("模板已导出：%1").arg(strDestPath), 4000);
-    } else {
-        QMessageBox::critical(this, QStringLiteral("导出模板"), strErrorMessage);
-    }
-}
-
-void MainWindow::onAddStickerComponent(int nIndex)
-{
-    if (!currentPage()) {
-        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
-        return;
-    }
-    Component component;
-    component.eType = E_COMPONENT_TYPE_STICKER;
-    component.stickerData.eStickerType = static_cast<E_STICKER_TYPE>(nIndex);
-    component.stickerData.color = ThemeManager::currentTheme().primaryColor;
-    // 按贴纸类型给默认尺寸
-    switch (component.stickerData.eStickerType) {
-    case E_STICKER_TYPE_TITLE_LINE:
-        component.size = QSizeF(320, 16);
-        break;
-    case E_STICKER_TYPE_CORNER_BADGE:
-        component.size = QSizeF(60, 40);
-        break;
-    case E_STICKER_TYPE_STAR_RATING:
-        component.size = QSizeF(160, 28);
-        break;
-    case E_STICKER_TYPE_ARROW:
-        component.size = QSizeF(120, 40);
-        break;
-    case E_STICKER_TYPE_DIVIDER:
-        component.size = QSizeF(320, 12);
-        break;
-    case E_STICKER_TYPE_CARD_BORDER:
-    default:
-        component.size = QSizeF(320, 180);
-        break;
-    }
-    ComponentItem* pNewItem = m_pScene->addComponent(component);
-    if (pNewItem) {
-        m_pScene->clearSelection();
-        pNewItem->setSelected(true);
-        m_pView->centerOn(pNewItem);
-    }
+    m_pLayerPanel->syncSelectionFromScene();
 }
 
 void MainWindow::applyTheme()
@@ -1539,215 +742,36 @@ void MainWindow::applyTheme()
     updateCanvasEditor();
 }
 
+void MainWindow::applyUiStyle()
+{
+    // 应用当前 UI 风格（亚克力等）到主窗口。非 Windows 或失败时回退 system。
+    // 不调用 applyTheme：画布背景由 CanvasScene 的页面矩形控制，不受窗口透明影响；
+    // 且 applyTheme 会重建画布，showEvent 多次触发会丢失选中状态。
+    UiStyleManager::applyCurrentStyle(this);
+}
+
+// =========================================================================
+// 项目/页面辅助
+// =========================================================================
+
 Page* MainWindow::currentPage()
 {
-    const QString strPageKey = selectedPageKey();
-    if (strPageKey.isEmpty()) {
+    const QString strPageKey = m_pTreePanel->selectedPageKey();
+    if(strPageKey.isEmpty()) {
         return nullptr;
     }
     const QStringList parts = strPageKey.split(QLatin1Char(':'));
     const int nWalkthroughIndex = parts.at(0).toInt();
     const int nPageIndex = parts.at(1).toInt();
     Project* pProject = m_pProjectManager->project();
-    if (!pProject || nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+    if(!pProject || nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
         return nullptr;
     }
     Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
-    if (nPageIndex < 0 || nPageIndex >= rWalkthrough.vecPages.size()) {
+    if(nPageIndex < 0 || nPageIndex >= rWalkthrough.vecPages.size()) {
         return nullptr;
     }
     return &rWalkthrough.vecPages[nPageIndex];
-}
-
-void MainWindow::updateCanvasEditor()
-{
-    Page* pPage = currentPage();
-    if (!pPage) {
-        m_pScene->clearPage();
-        return;
-    }
-    m_bSyncingCanvas = true;
-    m_pScene->loadPage(*pPage);
-    m_bSyncingCanvas = false;
-    m_pView->fitInView(m_pScene->sceneRect(), Qt::KeepAspectRatio);
-    m_pView->centerOn(m_pScene->sceneRect().center());
-    refreshLayerList();
-}
-
-void MainWindow::syncCanvasToModel()
-{
-    if (m_bSyncingCanvas) {
-        return;
-    }
-    Page* pPage = currentPage();
-    if (pPage) {
-        m_pScene->syncToModel(pPage);
-        m_pProjectManager->setDirty();
-        updateWindowTitle();
-    }
-}
-
-void MainWindow::onCanvasComponentsChanged()
-{
-    syncCanvasToModel();
-    refreshLayerList();
-}
-
-void MainWindow::onCanvasSelectionChanged()
-{
-    // 场景选中变化 → 同步图层面板选中行（guard 防回环）
-    if (m_bSyncingCanvas) {
-        return;
-    }
-    m_bSyncingCanvas = true;
-    const QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
-    for (int nRow = 0; nRow < m_pLayerList->count(); ++nRow) {
-        QListWidgetItem* pListItem = m_pLayerList->item(nRow);
-        auto* pItem = static_cast<ComponentItem*>(pListItem->data(nComponentItemRole).value<void*>());
-        pListItem->setSelected(vecSelected.contains(pItem));
-    }
-    m_bSyncingCanvas = false;
-}
-
-void MainWindow::refreshLayerList()
-{
-    m_bSyncingCanvas = true;
-    m_pLayerList->blockSignals(true);
-    m_pLayerList->clear();
-    const QVector<ComponentItem*> vecItems = m_pScene->componentItems();
-    // 列表行 0 在最底层（zOrder 最小），最后一行在最顶层
-    for (const ComponentItem* pItem : vecItems) {
-        const Component& rComponent = pItem->component();
-        auto* pListItem = new QListWidgetItem(componentDisplayName(rComponent));
-        pListItem->setFlags(pListItem->flags() | Qt::ItemIsUserCheckable);
-        pListItem->setCheckState(rComponent.bVisible ? Qt::Checked : Qt::Unchecked);
-        pListItem->setData(nComponentItemRole, QVariant::fromValue(static_cast<void*>(
-            const_cast<ComponentItem*>(pItem))));
-        m_pLayerList->addItem(pListItem);
-    }
-    m_pLayerList->blockSignals(false);
-    m_bSyncingCanvas = false;
-}
-
-void MainWindow::onAddImageComponent()
-{
-    if (!currentPage()) {
-        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
-        return;
-    }
-    const QString strFilePath = QFileDialog::getOpenFileName(
-        this, QStringLiteral("选择图片"), QString(),
-        QStringLiteral("图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.gif)"));
-    if (strFilePath.isEmpty()) {
-        return;
-    }
-    QString strAssetPath = strFilePath;
-    // 优先复制进项目 assets/（自包含；有项目时才复制）
-    if (m_pProjectManager->hasProject()) {
-        const QString strAssetsDir = m_pProjectManager->projectDirectory() + QStringLiteral("/assets");
-        QDir dir(strAssetsDir);
-        if (!dir.exists()) {
-            dir.mkpath(QStringLiteral("."));
-        }
-        const QFileInfo info(strFilePath);
-        const QString strTarget = dir.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces)
-                                               + QLatin1Char('.') + info.suffix());
-        if (QFile::copy(strFilePath, strTarget)) {
-            strAssetPath = strTarget;
-            refreshAssetList();
-        }
-    }
-
-    Component component;
-    component.eType = E_COMPONENT_TYPE_IMAGE;
-    component.imageData.strFilePath = strAssetPath;
-    component.size = QSizeF(300, 200);
-    ComponentItem* pNewItem = m_pScene->addComponent(component);
-    if (pNewItem) {
-        m_pScene->clearSelection();
-        pNewItem->setSelected(true);
-        m_pView->centerOn(pNewItem);
-    }
-}
-
-void MainWindow::onAddTextComponent()
-{
-    if (!currentPage()) {
-        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
-        return;
-    }
-    bool bOk = false;
-    const QString strContent = QInputDialog::getText(
-        this, QStringLiteral("插入文本"), QStringLiteral("文本内容："),
-        QLineEdit::Normal, QStringLiteral("攻略文本"), &bOk);
-    if (!bOk) {
-        return;
-    }
-    Component component;
-    component.eType = E_COMPONENT_TYPE_TEXT;
-    component.textData.strContent = strContent;
-    component.textData.color = ThemeManager::currentTheme().textColor;
-    component.size = QSizeF(300, 60);
-    ComponentItem* pNewItem = m_pScene->addComponent(component);
-    if (pNewItem) {
-        m_pScene->clearSelection();
-        pNewItem->setSelected(true);
-        m_pView->centerOn(pNewItem);
-    }
-}
-
-void MainWindow::onAddShapeComponent(int nIndex)
-{
-    if (!currentPage()) {
-        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
-        return;
-    }
-    Component component;
-    component.eType = E_COMPONENT_TYPE_SHAPE;
-    component.shapeData.eShapeType = static_cast<E_SHAPE_TYPE>(nIndex);
-    component.shapeData.fillColor = ThemeManager::currentTheme().secondaryColor;
-    component.shapeData.borderColor = ThemeManager::currentTheme().primaryColor;
-    component.size = QSizeF(200, 120);
-    ComponentItem* pNewItem = m_pScene->addComponent(component);
-    if (pNewItem) {
-        m_pScene->clearSelection();
-        pNewItem->setSelected(true);
-        m_pView->centerOn(pNewItem);
-    }
-}
-
-void MainWindow::onAddTableComponent()
-{
-    if (!currentPage()) {
-        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
-        return;
-    }
-    Component component;
-    component.eType = E_COMPONENT_TYPE_TABLE;
-    component.size = QSizeF(420, 200);
-    component.tableData.vecRows = {
-        {QStringLiteral("装备"), QStringLiteral("攻击"), QStringLiteral("获取途径")},
-        {QStringLiteral("猎犬长牙"), QStringLiteral("145"), QStringLiteral("宁姆格福")},
-        {QStringLiteral("名刀月隐"), QStringLiteral("160"), QStringLiteral("湖区")},
-    };
-    ComponentItem* pNewItem = m_pScene->addComponent(component);
-    if (pNewItem) {
-        m_pScene->clearSelection();
-        pNewItem->setSelected(true);
-        m_pView->centerOn(pNewItem);
-    }
-}
-
-void MainWindow::onDeleteSelected()
-{
-    m_pScene->removeSelectedComponents();
-}
-
-void MainWindow::onSelectAllComponents()
-{
-    for (ComponentItem* pItem : m_pScene->componentItems()) {
-        pItem->setSelected(true);
-    }
 }
 
 QVector<Component> MainWindow::currentComponents()
@@ -1759,19 +783,76 @@ QVector<Component> MainWindow::currentComponents()
 void MainWindow::pushSnapshot(const QString& strText, const QVector<Component>& rBefore,
                               const QVector<Component>& rAfter)
 {
-    if (rBefore == rAfter) {
+    if(rBefore == rAfter) {
         return;
     }
     Page* pPage = currentPage();
-    if (!pPage) {
+    if(!pPage) {
         return;
     }
     m_pUndoStack->push(new PageSnapshotCommand(pPage, rBefore, rAfter, strText, m_pScene));
 }
 
+void MainWindow::updateWindowTitle()
+{
+    if(!m_pProjectManager->hasProject()) {
+        setWindowTitle(QStringLiteral("更好的攻略制作器"));
+        return;
+    }
+    const QString strDirtyMark = m_pProjectManager->isDirty() ? QStringLiteral(" *") : QString();
+    setWindowTitle(QStringLiteral("%1%2 - 更好的攻略制作器")
+                       .arg(m_pProjectManager->project()->strName, strDirtyMark));
+}
+
+PluginContext MainWindow::makeContext() const
+{
+    PluginContext ctx;
+    ctx.theme = ThemeManager::currentTheme();
+    ctx.defaultPageSize = Settings::defaultPageSize();
+    ctx.projectDirectory = m_pProjectManager->hasProject()
+        ? m_pProjectManager->projectDirectory() : QString();
+    // 注意：currentPage 返回非 const，这里不能在 const 方法中调用
+    // pCurrentPage 由调用方在需要时单独设置
+    return ctx;
+}
+
+// =========================================================================
+// 组件插入（统一入口）
+// =========================================================================
+
+void MainWindow::insertComponent(const IComponentProvider* pProvider)
+{
+    if(!currentPage()) {
+        statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
+        return;
+    }
+    PluginContext ctx = makeContext();
+    ctx.pCurrentPage = currentPage();
+
+    Component component = pProvider->createComponent(ctx);
+
+    // 若 Provider 需要输入对话框（如图片文件选择、文本输入），弹出对话框
+    if(pProvider->requiresInputDialog()) {
+        if(!pProvider->showInputDialog(this, component, ctx)) {
+            return;   // 用户取消
+        }
+    }
+
+    ComponentItem* pNewItem = m_pScene->addComponent(component);
+    if(pNewItem) {
+        m_pScene->clearSelection();
+        pNewItem->setSelected(true);
+        m_pView->centerOn(pNewItem);
+    }
+}
+
+// =========================================================================
+// 编辑操作
+// =========================================================================
+
 void MainWindow::onComponentEditStarted()
 {
-    if (m_bInEditTransaction) {
+    if(m_bInEditTransaction) {
         return;
     }
     m_bInEditTransaction = true;
@@ -1780,19 +861,30 @@ void MainWindow::onComponentEditStarted()
 
 void MainWindow::onComponentEditFinished()
 {
-    if (!m_bInEditTransaction) {
+    if(!m_bInEditTransaction) {
         return;
     }
     m_bInEditTransaction = false;
-    // 编辑期间 geometryChanged 已把模型同步为最新状态
     pushSnapshot(QStringLiteral("移动/缩放组件"), m_editBeforeSnapshot, currentComponents());
+}
+
+void MainWindow::onDeleteSelected()
+{
+    m_pScene->removeSelectedComponents();
+}
+
+void MainWindow::onSelectAllComponents()
+{
+    for(ComponentItem* pItem : m_pScene->componentItems()) {
+        pItem->setSelected(true);
+    }
 }
 
 void MainWindow::onCopy()
 {
     m_vecClipboard.clear();
     const QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
-    for (const ComponentItem* pItem : vecSelected) {
+    for(const ComponentItem* pItem : vecSelected) {
         m_vecClipboard.append(pItem->component());
     }
     statusBar()->showMessage(QStringLiteral("已复制 %1 个组件").arg(m_vecClipboard.size()), 2000);
@@ -1800,30 +892,29 @@ void MainWindow::onCopy()
 
 void MainWindow::onPaste()
 {
-    if (m_vecClipboard.isEmpty()) {
+    if(m_vecClipboard.isEmpty()) {
         return;
     }
     Page* pPage = currentPage();
-    if (!pPage) {
+    if(!pPage) {
         statusBar()->showMessage(QStringLiteral("请先在左侧选择要编辑的页面"), 3000);
         return;
     }
     const QVector<Component> vecBefore = pPage->vecComponents;
     const int nOffset = 20;
-    for (const Component& rComponent : m_vecClipboard) {
+    for(const Component& rComponent : m_vecClipboard) {
         Component component = rComponent;
         component.strId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         component.pos += QPointF(nOffset, nOffset);
         component.nZOrder = 0;   // addComponent 自动分配新 zOrder
         m_pScene->addComponent(component);
     }
-    // addComponent 已触发同步，模型为粘贴后状态
     pushSnapshot(QStringLiteral("粘贴组件"), vecBefore, currentComponents());
 }
 
 void MainWindow::onCut()
 {
-    if (m_pScene->selectedComponentItems().isEmpty()) {
+    if(m_pScene->selectedComponentItems().isEmpty()) {
         return;
     }
     onCopy();
@@ -1833,7 +924,7 @@ void MainWindow::onCut()
 void MainWindow::onAlignComponents(int nAlign)
 {
     QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
-    if (vecSelected.size() < 2) {
+    if(vecSelected.size() < 2) {
         statusBar()->showMessage(QStringLiteral("请先选中至少两个组件"), 2000);
         return;
     }
@@ -1841,9 +932,9 @@ void MainWindow::onAlignComponents(int nAlign)
     // 计算选中组件的包围盒
     QRectF boundingBox;
     bool bFirst = true;
-    for (const ComponentItem* pItem : vecSelected) {
+    for(const ComponentItem* pItem : vecSelected) {
         const QRectF itemRect(pItem->component().pos, pItem->component().size);
-        if (bFirst) {
+        if(bFirst) {
             boundingBox = itemRect;
             bFirst = false;
         } else {
@@ -1852,11 +943,11 @@ void MainWindow::onAlignComponents(int nAlign)
     }
 
     const QVector<Component> vecBefore = currentComponents();
-    for (ComponentItem* pItem : vecSelected) {
+    for(ComponentItem* pItem : vecSelected) {
         Component component = pItem->component();
         const qreal dWidth = component.size.width();
         const qreal dHeight = component.size.height();
-        switch (nAlign) {
+        switch(nAlign) {
         case E_ALIGN_LEFT:
             component.pos.setX(boundingBox.left());
             break;
@@ -1886,7 +977,7 @@ void MainWindow::onAlignComponents(int nAlign)
 void MainWindow::onDistributeComponents(bool bHorizontal)
 {
     QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
-    if (vecSelected.size() < 3) {
+    if(vecSelected.size() < 3) {
         statusBar()->showMessage(QStringLiteral("请先选中至少三个组件"), 2000);
         return;
     }
@@ -1907,7 +998,7 @@ void MainWindow::onDistributeComponents(bool bHorizontal)
         ? vecSelected.last()->component().pos.x() + vecSelected.last()->component().size.width()
         : vecSelected.last()->component().pos.y() + vecSelected.last()->component().size.height();
     qreal dTotalSize = 0;
-    for (const ComponentItem* pItem : vecSelected) {
+    for(const ComponentItem* pItem : vecSelected) {
         dTotalSize += bHorizontal ? pItem->component().size.width()
                                   : pItem->component().size.height();
     }
@@ -1915,9 +1006,9 @@ void MainWindow::onDistributeComponents(bool bHorizontal)
 
     const QVector<Component> vecBefore = currentComponents();
     qreal dCursor = dStart;
-    for (ComponentItem* pItem : vecSelected) {
+    for(ComponentItem* pItem : vecSelected) {
         Component component = pItem->component();
-        if (bHorizontal) {
+        if(bHorizontal) {
             component.pos.setX(dCursor);
         } else {
             component.pos.setY(dCursor);
@@ -1932,7 +1023,7 @@ void MainWindow::onCanvasContextMenu(const QPointF& rScenePos)
 {
     ComponentItem* pHitItem = componentItemAt(rScenePos);
     // 命中未选中的组件时先选中它
-    if (pHitItem && !pHitItem->isSelected()) {
+    if(pHitItem && !pHitItem->isSelected()) {
         m_pScene->clearSelection();
         pHitItem->setSelected(true);
     }
@@ -1958,10 +1049,10 @@ void MainWindow::onCanvasContextMenu(const QPointF& rScenePos)
 
     QAction* pEditTextAction = nullptr;
     QAction* pLockAction = nullptr;
-    if (pHitItem) {
+    if(pHitItem) {
         const E_COMPONENT_TYPE eType = pHitItem->component().eType;
-        if (eType == E_COMPONENT_TYPE_TEXT || eType == E_COMPONENT_TYPE_TABLE
-            || eType == E_COMPONENT_TYPE_STICKER) {
+        if(eType == E_COMPONENT_TYPE_TEXT || eType == E_COMPONENT_TYPE_TABLE
+           || eType == E_COMPONENT_TYPE_STICKER) {
             menu.addSeparator();
             pEditTextAction = menu.addAction(eType == E_COMPONENT_TYPE_TEXT
                                                  ? QStringLiteral("编辑文本…")
@@ -1976,32 +1067,32 @@ void MainWindow::onCanvasContextMenu(const QPointF& rScenePos)
     }
 
     QAction* pChosen = menu.exec(QCursor::pos());
-    if (!pChosen) {
+    if(!pChosen) {
         return;
     }
-    if (pChosen == pCutAction) {
+    if(pChosen == pCutAction) {
         onCut();
-    } else if (pChosen == pCopyAction) {
+    } else if(pChosen == pCopyAction) {
         onCopy();
-    } else if (pChosen == pPasteAction) {
+    } else if(pChosen == pPasteAction) {
         onPaste();
-    } else if (pChosen == pDeleteAction) {
+    } else if(pChosen == pDeleteAction) {
         onDeleteSelected();
-    } else if (pChosen == pToTopAction) {
+    } else if(pChosen == pToTopAction) {
         const QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
-        for (ComponentItem* pItem : vecSelected) {
+        for(ComponentItem* pItem : vecSelected) {
             setItemToTop(pItem, true);
         }
         syncCanvasToModel();
-    } else if (pChosen == pToBottomAction) {
+    } else if(pChosen == pToBottomAction) {
         const QVector<ComponentItem*> vecSelected = m_pScene->selectedComponentItems();
-        for (ComponentItem* pItem : vecSelected) {
+        for(ComponentItem* pItem : vecSelected) {
             setItemToTop(pItem, false);
         }
         syncCanvasToModel();
-    } else if (pChosen == pEditTextAction && pHitItem) {
+    } else if(pChosen == pEditTextAction && pHitItem) {
         pHitItem->editContent();
-    } else if (pChosen == pLockAction && pHitItem) {
+    } else if(pChosen == pLockAction && pHitItem) {
         Component component = pHitItem->component();
         component.bLocked = !component.bLocked;
         pHitItem->setComponent(component);
@@ -2020,14 +1111,18 @@ void MainWindow::onToggleSnapToGuides(bool bEnable)
     m_pScene->setSnapToGuides(bEnable);
 }
 
+// =========================================================================
+// 图层辅助
+// =========================================================================
+
 void MainWindow::setItemToTop(ComponentItem* pItem, bool bTop)
 {
     int nTargetZ = bTop ? 0 : INT_MAX;
-    for (const ComponentItem* pOther : m_pScene->componentItems()) {
-        if (pOther == pItem) {
+    for(const ComponentItem* pOther : m_pScene->componentItems()) {
+        if(pOther == pItem) {
             continue;
         }
-        if (bTop) {
+        if(bTop) {
             nTargetZ = qMax(nTargetZ, pOther->component().nZOrder);
         } else {
             nTargetZ = qMin(nTargetZ, pOther->component().nZOrder);
@@ -2041,250 +1136,28 @@ void MainWindow::setItemToTop(ComponentItem* pItem, bool bTop)
 
 ComponentItem* MainWindow::componentItemAt(const QPointF& rScenePos) const
 {
-    for (const ComponentItem* pItem : m_pScene->componentItems()) {
+    for(const ComponentItem* pItem : m_pScene->componentItems()) {
         // 命中检测用组件的矩形范围（不考虑旋转手柄）
         const QRectF itemRect(pItem->component().pos, pItem->component().size);
-        if (itemRect.contains(rScenePos)) {
+        if(itemRect.contains(rScenePos)) {
             return const_cast<ComponentItem*>(pItem);
         }
     }
     return nullptr;
 }
 
-void MainWindow::refreshAssetList()
-{
-    m_pAssetList->clear();
-    if (!m_pProjectManager->hasProject()) {
-        return;
-    }
-    const QString strAssetsDir = m_pProjectManager->projectDirectory() + QStringLiteral("/assets");
-    QDir dir(strAssetsDir);
-    const QStringList filters = {QStringLiteral("*.png"), QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"),
-                                 QStringLiteral("*.bmp"), QStringLiteral("*.webp"), QStringLiteral("*.gif")};
-    const QStringList files = dir.entryList(filters, QDir::Files);
-    for (const QString& strFile : files) {
-        const QString strPath = dir.absoluteFilePath(strFile);
-        const QImage image(strPath);
-        auto* pItem = new QListWidgetItem(
-            QIcon(QPixmap::fromImage(image.scaled(56, 56, Qt::KeepAspectRatio, Qt::SmoothTransformation))),
-            strFile);
-        pItem->setData(Qt::UserRole, strPath);
-        pItem->setToolTip(strPath);
-        m_pAssetList->addItem(pItem);
-    }
-}
+// =========================================================================
+// 素材面板信号处理
+// =========================================================================
 
-void MainWindow::onImportAssets()
+void MainWindow::onAssetInserted(const Component& rComponent)
 {
-    if (!m_pProjectManager->hasProject()) {
-        statusBar()->showMessage(QStringLiteral("请先打开项目"), 3000);
-        return;
-    }
-    const QStringList files = QFileDialog::getOpenFileNames(
-        this, QStringLiteral("导入素材"), QString(),
-        QStringLiteral("图片 (*.png *.jpg *.jpeg *.bmp *.webp *.gif)"));
-    if (files.isEmpty()) {
-        return;
-    }
-    const QString strAssetsDir = m_pProjectManager->projectDirectory() + QStringLiteral("/assets");
-    QDir dir(strAssetsDir);
-    if (!dir.exists()) {
-        dir.mkpath(QStringLiteral("."));
-    }
-    for (const QString& strSource : files) {
-        const QFileInfo info(strSource);
-        const QString strTarget = dir.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces)
-                                               + QLatin1Char('.') + info.suffix());
-        QFile::copy(strSource, strTarget);
-    }
-    refreshAssetList();
-    statusBar()->showMessage(QStringLiteral("已导入 %1 个素材").arg(files.size()), 3000);
-}
-
-void MainWindow::onAssetDoubleClicked(QListWidgetItem* pItem)
-{
-    if (!pItem) {
-        return;
-    }
-    const QString strPath = pItem->data(Qt::UserRole).toString();
-    if (strPath.isEmpty()) {
-        return;
-    }
-    Component component;
-    component.eType = E_COMPONENT_TYPE_IMAGE;
-    component.imageData.strFilePath = strPath;
-    component.size = QSizeF(300, 200);
-    ComponentItem* pNewItem = m_pScene->addComponent(component);
-    if (pNewItem) {
+    ComponentItem* pNewItem = m_pScene->addComponent(rComponent);
+    if(pNewItem) {
         m_pScene->clearSelection();
         pNewItem->setSelected(true);
         m_pView->centerOn(pNewItem);
     }
-}
-
-void MainWindow::onAssetContextMenu(const QPoint& rPos)
-{
-    QListWidgetItem* pItem = m_pAssetList->itemAt(rPos);
-    if (!pItem) {
-        return;
-    }
-    QMenu menu(this);
-    QAction* pInsertAction = menu.addAction(QStringLiteral("插入到画布"));
-    QAction* pDeleteAction = menu.addAction(QStringLiteral("删除素材"));
-    QAction* pChosen = menu.exec(m_pAssetList->viewport()->mapToGlobal(rPos));
-    if (!pChosen) {
-        return;
-    }
-    if (pChosen == pInsertAction) {
-        onAssetDoubleClicked(pItem);
-    } else if (pChosen == pDeleteAction) {
-        const QString strPath = pItem->data(Qt::UserRole).toString();
-        // 引用检查：若任一页面的图片组件引用该素材，禁止删除
-        bool bInUse = false;
-        const Project* pProject = m_pProjectManager->project();
-        if (pProject) {
-            for (const Walkthrough& rWalkthrough : pProject->vecWalkthroughs) {
-                for (const Page& rPage : rWalkthrough.vecPages) {
-                    for (const Component& rComponent : rPage.vecComponents) {
-                        if (rComponent.eType == E_COMPONENT_TYPE_IMAGE
-                            && rComponent.imageData.strFilePath == strPath) {
-                            bInUse = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if (bInUse) {
-            QMessageBox::warning(this, QStringLiteral("删除素材"),
-                                 QStringLiteral("该素材正被页面引用，无法删除"));
-            return;
-        }
-        QFile::remove(strPath);
-        refreshAssetList();
-    }
-}
-
-void MainWindow::moveLayer(int nOffset)
-{
-    const QList<QListWidgetItem*> selected = m_pLayerList->selectedItems();
-    if (selected.isEmpty()) {
-        return;
-    }
-    const int nRow = m_pLayerList->row(selected.first());
-    const int nTarget = nRow + nOffset;
-    if (nTarget < 0 || nTarget >= m_pLayerList->count()) {
-        return;
-    }
-    moveLayerTo(nTarget);
-}
-
-void MainWindow::moveLayerTo(int nTargetIndex)
-{
-    const QList<QListWidgetItem*> selected = m_pLayerList->selectedItems();
-    if (selected.isEmpty() || m_pLayerList->count() < 2) {
-        return;
-    }
-    const int nSourceIndex = m_pLayerList->row(selected.first());
-    if (nSourceIndex == nTargetIndex) {
-        return;
-    }
-
-    auto* pSourceItem = static_cast<ComponentItem*>(
-        m_pLayerList->item(nSourceIndex)->data(nComponentItemRole).value<void*>());
-    auto* pTargetItem = static_cast<ComponentItem*>(
-        m_pLayerList->item(nTargetIndex)->data(nComponentItemRole).value<void*>());
-
-    // 交换 zOrder 后刷新场景层级
-    Component sourceComponent = pSourceItem->component();
-    Component targetComponent = pTargetItem->component();
-    const int nTemp = sourceComponent.nZOrder;
-    sourceComponent.nZOrder = targetComponent.nZOrder;
-    targetComponent.nZOrder = nTemp;
-    pSourceItem->setComponent(sourceComponent);
-    pTargetItem->setComponent(targetComponent);
-
-    m_pScene->sortByZOrder();
-    refreshLayerList();
-    // 保持选中
-    for (int nRow = 0; nRow < m_pLayerList->count(); ++nRow) {
-        if (m_pLayerList->item(nRow)->data(nComponentItemRole).value<void*>() == pSourceItem) {
-            m_pLayerList->setCurrentRow(nRow);
-            break;
-        }
-    }
-    syncCanvasToModel();
-}
-
-void MainWindow::onLayerMoveUp()
-{
-    moveLayer(1);   // 行号增大 = 更上层
-}
-
-void MainWindow::onLayerMoveDown()
-{
-    moveLayer(-1);  // 行号减小 = 更下层
-}
-
-void MainWindow::onLayerToTop()
-{
-    moveLayerTo(m_pLayerList->count() - 1);
-}
-
-void MainWindow::onLayerToBottom()
-{
-    moveLayerTo(0);
-}
-
-void MainWindow::onLayerSelectionChanged()
-{
-    if (m_bSyncingCanvas) {
-        return;
-    }
-    const QList<QListWidgetItem*> selected = m_pLayerList->selectedItems();
-    if (selected.isEmpty()) {
-        return;
-    }
-    auto* pItem = static_cast<ComponentItem*>(selected.first()->data(nComponentItemRole).value<void*>());
-    if (pItem) {
-        m_bSyncingCanvas = true;
-        m_pScene->clearSelection();
-        pItem->setSelected(true);
-        m_bSyncingCanvas = false;
-        m_pView->centerOn(pItem);
-    }
-}
-
-void MainWindow::onLayerVisibilityChanged(QListWidgetItem* pListItem)
-{
-    if (m_bSyncingCanvas) {
-        return;
-    }
-    auto* pItem = static_cast<ComponentItem*>(pListItem->data(nComponentItemRole).value<void*>());
-    if (!pItem) {
-        return;
-    }
-    Component component = pItem->component();
-    component.bVisible = (pListItem->checkState() == Qt::Checked);
-    pItem->setComponent(component);
-    pItem->setVisible(component.bVisible);
-    syncCanvasToModel();
-}
-
-void MainWindow::onProjectTreeSelectionChanged()
-{
-    updateCanvasEditor();
-}
-
-void MainWindow::updateWindowTitle()
-{
-    if (!m_pProjectManager->hasProject()) {
-        setWindowTitle(QStringLiteral("更好的攻略制作器"));
-        return;
-    }
-    const QString strDirtyMark = m_pProjectManager->isDirty() ? QStringLiteral(" *") : QString();
-    setWindowTitle(QStringLiteral("%1%2 - 更好的攻略制作器")
-                       .arg(m_pProjectManager->project()->strName, strDirtyMark));
 }
 
 } // namespace bwm
