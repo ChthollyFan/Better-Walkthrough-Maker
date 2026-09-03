@@ -1,6 +1,7 @@
 # 核心库：数据模型、序列化、项目管理、设置、渲染与导出、模板与主题、
 # 插件接口与内置适配器（主程序与单元测试共用）
 add_library(bwm_core STATIC
+  core/Article.cpp
   core/Component.cpp
   core/ComponentPainter.cpp
   core/ComponentSerializer.cpp

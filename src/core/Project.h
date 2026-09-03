@@ -6,6 +6,7 @@
 #ifndef BWM_CORE_PROJECT_H
 #define BWM_CORE_PROJECT_H
 
+#include "core/Article.h"
 #include "core/Component.h"
 
 #include <QSize>
@@ -47,7 +48,8 @@ struct Walkthrough {
 struct Project {
     QString strName;                      // 游戏名
     QString strFilePath;                  // project.json 的绝对路径
-    QVector<Walkthrough> vecWalkthroughs; // 攻略列表
+    QVector<Walkthrough> vecWalkthroughs; // 图文攻略列表
+    QVector<Article> vecArticles;         // 文章攻略列表（基于 Markdown，与图文攻略平级）
     // 预留：素材库（M3）、模板引用（M5）、主题引用（M5）
 };
 
