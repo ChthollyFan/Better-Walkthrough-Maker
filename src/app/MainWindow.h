@@ -23,6 +23,7 @@
 #include "plugin/IComponentProvider.h"
 
 class QMenu;
+class QStackedWidget;
 class QTabWidget;
 class QToolBar;
 class QUndoStack;
@@ -37,6 +38,7 @@ class PluginHost;
 class ProjectManager;
 class ProjectTreePanel;
 class AssetPanel;
+class ArticleEditor;
 
 // 主窗口：组装各面板与画布，路由跨模块信号。
 class MainWindow : public QMainWindow
@@ -69,6 +71,7 @@ private slots:
 
     // 项目树信号处理
     void onPageSelected(const QString& rPageKey);
+    void onArticleSelected(const QString& rArticleKey);
     void onProjectStructureChanged();
 
     // 画布与模型同步
@@ -115,6 +118,9 @@ private:
     // ---- 画布与模型同步 ----
     void updateCanvasEditor();
     void syncCanvasToModel();
+
+    // ---- 文章编辑器同步 ----
+    void updateArticleEditor();
     void applyTheme();
     void applyUiStyle();
 
@@ -148,6 +154,8 @@ private:
     AssetPanel* m_pAssetPanel = nullptr;          ///< 素材库面板
     LayerPanel* m_pLayerPanel = nullptr;          ///< 图层面板
     QTabWidget* m_pTabPanel = nullptr;            ///< 右侧标签页容器
+    ArticleEditor* m_pArticleEditor = nullptr;    ///< 文章编辑器
+    QStackedWidget* m_pCentralStack = nullptr;    ///< 中央切换容器（画布/文章编辑器）
 
     // ---- UI 控件 ----
     QMenu* m_pRecentProjectsMenu = nullptr;       ///< 最近项目菜单

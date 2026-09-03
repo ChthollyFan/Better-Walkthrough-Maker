@@ -19,6 +19,7 @@
 #include "app/dialogs/NewProjectDialog.h"
 #include "app/dialogs/SettingsDialog.h"
 #include "app/panels/AssetPanel.h"
+#include "app/panels/ArticleEditor.h"
 #include "app/panels/LayerPanel.h"
 #include "app/panels/ProjectTreePanel.h"
 #include "core/Project.h"
@@ -54,6 +55,7 @@
 #include <QPair>
 #include <QPushButton>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QToolBar>
@@ -396,11 +398,37 @@ void MainWindow::createCentralWidget()
     m_pTreePanel = new ProjectTreePanel(this, m_pProjectManager, m_pHost);
     connect(m_pTreePanel, &ProjectTreePanel::pageSelected,
             this, &MainWindow::onPageSelected);
+    connect(m_pTreePanel, &ProjectTreePanel::articleSelected,
+            this, &MainWindow::onArticleSelected);
     connect(m_pTreePanel, &ProjectTreePanel::projectStructureChanged,
             this, &MainWindow::onProjectStructureChanged);
 
     // ---- 画布 ----
     m_pView = new CanvasView(m_pScene, this);
+
+    // ---- 文章编辑器 ----
+    m_pArticleEditor = new ArticleEditor(this, m_pProjectManager);
+    connect(m_pArticleEditor, &ArticleEditor::articleModified,
+            this, [this](const QString& rMarkdown) {
+        // 编辑器内容变化时同步回模型
+        const QString strKey = m_pTreePanel->selectedArticleKey();
+        if(strKey.isEmpty()) {
+            return;
+        }
+        const int nArticleIndex = strKey.mid(1).toInt();
+        Project* pProject = m_pProjectManager->project();
+        if(pProject && nArticleIndex >= 0 && nArticleIndex < pProject->vecArticles.size()) {
+            pProject->vecArticles[nArticleIndex].strMarkdown = rMarkdown;
+            m_pProjectManager->setDirty();
+            updateWindowTitle();
+        }
+    });
+
+    // ---- 中央切换容器：page 0 = 画布，page 1 = 文章编辑器 ----
+    m_pCentralStack = new QStackedWidget(this);
+    m_pCentralStack->addWidget(m_pView);              // index 0：画布
+    m_pCentralStack->addWidget(m_pArticleEditor);     // index 1：文章编辑器
+    m_pCentralStack->setCurrentIndex(0);              // 默认显示画布
 
     // ---- 右侧标签页：素材库 + 图层 ----
     m_pTabPanel = new QTabWidget(this);
@@ -418,10 +446,10 @@ void MainWindow::createCentralWidget()
     m_pTabPanel->addTab(m_pLayerPanel, QStringLiteral("图层"));
     m_pTabPanel->setCurrentIndex(1);   // 默认显示图层
 
-    // ---- 布局：项目树 | 画布 | 标签页 ----
+    // ---- 布局：项目树 | 中央切换容器 | 标签页 ----
     QSplitter* pSplitter = new QSplitter(Qt::Horizontal, this);
     pSplitter->addWidget(m_pTreePanel);
-    pSplitter->addWidget(m_pView);
+    pSplitter->addWidget(m_pCentralStack);
     pSplitter->addWidget(m_pTabPanel);
     pSplitter->setStretchFactor(1, 1);
     pSplitter->setSizes({220, 900, 220});
@@ -679,12 +707,26 @@ void MainWindow::onAutoSavePerformed(bool bOk, const QString& strMessage)
 void MainWindow::onPageSelected(const QString& rPageKey)
 {
     (void)rPageKey;
+    // 选中页面节点时切换到画布
+    if(!rPageKey.isEmpty()) {
+        m_pCentralStack->setCurrentIndex(0);
+    }
     updateCanvasEditor();
+}
+
+void MainWindow::onArticleSelected(const QString& rArticleKey)
+{
+    if(!rArticleKey.isEmpty()) {
+        // 选中文章节点时切换到文章编辑器
+        m_pCentralStack->setCurrentIndex(1);
+        updateArticleEditor();
+    }
 }
 
 void MainWindow::onProjectStructureChanged()
 {
     updateCanvasEditor();
+    updateArticleEditor();
     updateWindowTitle();
 }
 
@@ -705,6 +747,22 @@ void MainWindow::updateCanvasEditor()
     m_pView->fitInView(m_pScene->sceneRect(), Qt::KeepAspectRatio);
     m_pView->centerOn(m_pScene->sceneRect().center());
     m_pLayerPanel->refreshLayerList();
+}
+
+void MainWindow::updateArticleEditor()
+{
+    const QString strKey = m_pTreePanel->selectedArticleKey();
+    if(strKey.isEmpty()) {
+        m_pArticleEditor->clear();
+        return;
+    }
+    const int nArticleIndex = strKey.mid(1).toInt();
+    const Project* pProject = m_pProjectManager->project();
+    if(!pProject || nArticleIndex < 0 || nArticleIndex >= pProject->vecArticles.size()) {
+        m_pArticleEditor->clear();
+        return;
+    }
+    m_pArticleEditor->loadArticle(pProject->vecArticles.at(nArticleIndex));
 }
 
 void MainWindow::syncCanvasToModel()

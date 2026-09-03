@@ -41,6 +41,8 @@ add_executable(bwm WIN32
   app/MainWindow.cpp
   app/ComponentDisplay.cpp
   app/commands/PageSnapshotCommand.cpp
+  app/panels/ArticleEditor.cpp
+  app/panels/MarkdownPreview.cpp
   app/panels/ProjectTreePanel.cpp
   app/panels/AssetPanel.cpp
   app/panels/LayerPanel.cpp
