@@ -415,12 +415,19 @@ void MainWindow::createCentralWidget()
         if(strKey.isEmpty()) {
             return;
         }
-        const int nArticleIndex = strKey.mid(1).toInt();
+        // 文章键格式 "W:A文章索引"
+        const QStringList parts = strKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        const int nArticleIndex = parts.at(1).mid(1).toInt();   // 去掉 "A" 前缀
         Project* pProject = m_pProjectManager->project();
-        if(pProject && nArticleIndex >= 0 && nArticleIndex < pProject->vecArticles.size()) {
-            pProject->vecArticles[nArticleIndex].strMarkdown = rMarkdown;
-            m_pProjectManager->setDirty();
-            updateWindowTitle();
+        if(pProject && nWalkthroughIndex >= 0
+           && nWalkthroughIndex < pProject->vecWalkthroughs.size()) {
+            Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+            if(nArticleIndex >= 0 && nArticleIndex < rWalkthrough.vecArticles.size()) {
+                rWalkthrough.vecArticles[nArticleIndex].strMarkdown = rMarkdown;
+                m_pProjectManager->setDirty();
+                updateWindowTitle();
+            }
         }
     });
 
@@ -707,9 +714,10 @@ void MainWindow::onAutoSavePerformed(bool bOk, const QString& strMessage)
 void MainWindow::onPageSelected(const QString& rPageKey)
 {
     (void)rPageKey;
-    // 选中页面节点时切换到画布
+    // 选中页面节点时切换到画布，并显示右侧面板（素材库/图层）
     if(!rPageKey.isEmpty()) {
         m_pCentralStack->setCurrentIndex(0);
+        m_pTabPanel->show();
     }
     updateCanvasEditor();
 }
@@ -717,8 +725,9 @@ void MainWindow::onPageSelected(const QString& rPageKey)
 void MainWindow::onArticleSelected(const QString& rArticleKey)
 {
     if(!rArticleKey.isEmpty()) {
-        // 选中文章节点时切换到文章编辑器
+        // 选中文章节点时切换到文章编辑器，隐藏右侧面板（素材库/图层是画布专用）
         m_pCentralStack->setCurrentIndex(1);
+        m_pTabPanel->hide();
         updateArticleEditor();
     }
 }
@@ -756,13 +765,22 @@ void MainWindow::updateArticleEditor()
         m_pArticleEditor->clear();
         return;
     }
-    const int nArticleIndex = strKey.mid(1).toInt();
+    // 文章键格式 "W:A文章索引"
+    const QStringList parts = strKey.split(QLatin1Char(':'));
+    const int nWalkthroughIndex = parts.at(0).toInt();
+    const int nArticleIndex = parts.at(1).mid(1).toInt();
     const Project* pProject = m_pProjectManager->project();
-    if(!pProject || nArticleIndex < 0 || nArticleIndex >= pProject->vecArticles.size()) {
+    if(!pProject || nWalkthroughIndex < 0
+       || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
         m_pArticleEditor->clear();
         return;
     }
-    m_pArticleEditor->loadArticle(pProject->vecArticles.at(nArticleIndex));
+    const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+    if(nArticleIndex < 0 || nArticleIndex >= rWalkthrough.vecArticles.size()) {
+        m_pArticleEditor->clear();
+        return;
+    }
+    m_pArticleEditor->loadArticle(rWalkthrough.vecArticles.at(nArticleIndex));
 }
 
 void MainWindow::syncCanvasToModel()

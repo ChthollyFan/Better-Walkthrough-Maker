@@ -34,6 +34,26 @@ QSize parsePageSize(const QJsonObject& rPageObject)
     return QSize(nWidth, nHeight);
 }
 
+// 文章攻略 → JSON 对象
+QJsonObject articleToJson(const Article& rArticle)
+{
+    QJsonObject articleObject;
+    articleObject.insert(QStringLiteral("id"), rArticle.strId);
+    articleObject.insert(QStringLiteral("title"), rArticle.strTitle);
+    articleObject.insert(QStringLiteral("markdown"), rArticle.strMarkdown);
+    return articleObject;
+}
+
+// JSON 对象 → 文章攻略（缺失字段取默认值，保证容错）
+Article articleFromJson(const QJsonObject& rArticleObject)
+{
+    Article article;
+    article.strId = rArticleObject.value(QStringLiteral("id")).toString();
+    article.strTitle = rArticleObject.value(QStringLiteral("title")).toString(QStringLiteral("未命名文章"));
+    article.strMarkdown = rArticleObject.value(QStringLiteral("markdown")).toString();
+    return article;
+}
+
 QJsonObject walkthroughToJson(const Walkthrough& rWalkthrough)
 {
     QJsonObject walkthroughObject;
@@ -54,6 +74,13 @@ QJsonObject walkthroughToJson(const Walkthrough& rWalkthrough)
         pagesArray.append(pageObject);
     }
     walkthroughObject.insert(QStringLiteral("pages"), pagesArray);
+
+    QJsonArray articlesArray;
+    for (const Article& rArticle : rWalkthrough.vecArticles) {
+        articlesArray.append(articleToJson(rArticle));
+    }
+    walkthroughObject.insert(QStringLiteral("articles"), articlesArray);
+
     return walkthroughObject;
 }
 
@@ -92,27 +119,20 @@ Walkthrough walkthroughFromJson(const QJsonObject& rWalkthroughObject)
             walkthrough.vecPages.append(page);
         }
     }
+
+    // 文章列表：旧文件无 articles 字段时为空（向后兼容）
+    const QJsonValue articlesValue = rWalkthroughObject.value(QStringLiteral("articles"));
+    if (articlesValue.isArray()) {
+        const QJsonArray articlesArray = articlesValue.toArray();
+        for (const QJsonValue& rValue : articlesArray) {
+            if (!rValue.isObject()) {
+                continue;
+            }
+            walkthrough.vecArticles.append(articleFromJson(rValue.toObject()));
+        }
+    }
+
     return walkthrough;
-}
-
-// 文章攻略 → JSON 对象
-QJsonObject articleToJson(const Article& rArticle)
-{
-    QJsonObject articleObject;
-    articleObject.insert(QStringLiteral("id"), rArticle.strId);
-    articleObject.insert(QStringLiteral("title"), rArticle.strTitle);
-    articleObject.insert(QStringLiteral("markdown"), rArticle.strMarkdown);
-    return articleObject;
-}
-
-// JSON 对象 → 文章攻略（缺失字段取默认值，保证容错）
-Article articleFromJson(const QJsonObject& rArticleObject)
-{
-    Article article;
-    article.strId = rArticleObject.value(QStringLiteral("id")).toString();
-    article.strTitle = rArticleObject.value(QStringLiteral("title")).toString(QStringLiteral("未命名文章"));
-    article.strMarkdown = rArticleObject.value(QStringLiteral("markdown")).toString();
-    return article;
 }
 
 } // namespace
@@ -128,12 +148,6 @@ QString ProjectSerializer::toJson(const Project& rProject)
         walkthroughsArray.append(walkthroughToJson(rWalkthrough));
     }
     root.insert(QStringLiteral("walkthroughs"), walkthroughsArray);
-
-    QJsonArray articlesArray;
-    for (const Article& rArticle : rProject.vecArticles) {
-        articlesArray.append(articleToJson(rArticle));
-    }
-    root.insert(QStringLiteral("articles"), articlesArray);
 
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Indented));
 }
@@ -177,15 +191,24 @@ bool ProjectSerializer::fromJson(const QString& strJson, Project* pProject, QStr
         }
     }
 
-    // 文章攻略列表：旧文件无 articles 字段时为空（向后兼容）
+    // 向后兼容：旧版本的 project 级 articles 迁移到第一个攻略内
+    // （若无攻略，新建一个"迁移文章"攻略存放）
     const QJsonValue articlesValue = root.value(QStringLiteral("articles"));
     if (articlesValue.isArray()) {
         const QJsonArray articlesArray = articlesValue.toArray();
-        for (const QJsonValue& rValue : articlesArray) {
-            if (!rValue.isObject()) {
-                continue;
+        if (!articlesArray.isEmpty()) {
+            if (parsed.vecWalkthroughs.isEmpty()) {
+                Walkthrough walkthrough;
+                walkthrough.strTitle = QStringLiteral("迁移文章");
+                walkthrough.eType = E_WALKTHROUGH_TYPE_CUSTOM;
+                parsed.vecWalkthroughs.append(walkthrough);
             }
-            parsed.vecArticles.append(articleFromJson(rValue.toObject()));
+            for (const QJsonValue& rValue : articlesArray) {
+                if (rValue.isObject()) {
+                    parsed.vecWalkthroughs.first().vecArticles.append(
+                        articleFromJson(rValue.toObject()));
+                }
+            }
         }
     }
 

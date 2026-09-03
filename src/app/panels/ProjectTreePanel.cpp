@@ -83,14 +83,14 @@ void ProjectTreePanel::rebuildProjectTree()
             pPageItem->setText(0, rWalkthrough.vecPages.at(nPage).strName);
             m_mapNodeKeys.insert(pPageItem, QStringLiteral("%1:%2").arg(nWalkthrough).arg(nPage));
         }
-    }
 
-    // 文章攻略节点（扁平混排，与图文攻略平级，用前缀 A 区分）
-    for(int nArticle = 0; nArticle < pProject->vecArticles.size(); ++nArticle) {
-        const Article& rArticle = pProject->vecArticles.at(nArticle);
-        auto* pArticleItem = new QTreeWidgetItem(pRootItem);
-        pArticleItem->setText(0, QStringLiteral("%1（文章）").arg(rArticle.strTitle));
-        m_mapNodeKeys.insert(pArticleItem, QStringLiteral("A%1").arg(nArticle));
+        // 文章节点：与页面同级，放在攻略下，键格式 "W:A"
+        for(int nArticle = 0; nArticle < rWalkthrough.vecArticles.size(); ++nArticle) {
+            const Article& rArticle = rWalkthrough.vecArticles.at(nArticle);
+            auto* pArticleItem = new QTreeWidgetItem(pWalkthroughItem);
+            pArticleItem->setText(0, QStringLiteral("%1（文章）").arg(rArticle.strTitle));
+            m_mapNodeKeys.insert(pArticleItem, QStringLiteral("%1:A%2").arg(nWalkthrough).arg(nArticle));
+        }
     }
 
     m_pTree->expandAll();
@@ -114,8 +114,8 @@ QString ProjectTreePanel::selectedArticleKey() const
         return QString();
     }
     const QString strKey = m_mapNodeKeys.value(selected.first());
-    // 文章节点键以 A 开头（如 "A0"）
-    return strKey.startsWith(QLatin1Char('A')) ? strKey : QString();
+    // 文章节点键含 ":A"（如 "0:A0" 表示第 0 个攻略的第 0 个文章）
+    return strKey.contains(QStringLiteral(":A")) ? strKey : QString();
 }
 
 QString ProjectTreePanel::selectedNodeKey() const
@@ -160,15 +160,15 @@ void ProjectTreePanel::onContextMenu(const QPoint& rPos)
     QAction* pDeleteAction = nullptr;
     if(strKey.isEmpty()) {
         // 项目节点
-        pAddWalkthroughAction = menu.addAction(QStringLiteral("新建图文攻略…"));
-        pAddArticleAction = menu.addAction(QStringLiteral("新建文章…"));
-    } else if(strKey.startsWith(QLatin1Char('A'))) {
+        pAddWalkthroughAction = menu.addAction(QStringLiteral("新建攻略…"));
+    } else if(strKey.contains(QStringLiteral(":A"))) {
         // 文章节点
         pRenameAction = menu.addAction(QStringLiteral("重命名文章…"));
         pDeleteAction = menu.addAction(QStringLiteral("删除文章…"));
     } else if(!strKey.contains(QLatin1Char(':'))) {
-        // 图文攻略节点
+        // 攻略节点
         pAddPageAction = menu.addAction(QStringLiteral("新建页面…"));
+        pAddArticleAction = menu.addAction(QStringLiteral("新建文章…"));
         menu.addSeparator();
         pRenameAction = menu.addAction(QStringLiteral("重命名攻略…"));
         pDeleteAction = menu.addAction(QStringLiteral("删除攻略…"));
@@ -343,10 +343,25 @@ void ProjectTreePanel::onAddArticle()
         return;
     }
 
+    // 确定目标攻略：选中攻略节点或其子节点（页面/文章）
+    const QString strKey = selectedNodeKey();
+    int nWalkthroughIndex = -1;
+    if(strKey.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("新建文章"),
+                                 QStringLiteral("请先选中一个攻略"));
+        return;
+    }
+    const QStringList parts = strKey.split(QLatin1Char(':'));
+    nWalkthroughIndex = parts.at(0).toInt();
+    if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        return;
+    }
+    Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+
     bool bOk = false;
     const QString strTitle = QInputDialog::getText(
         this, QStringLiteral("新建文章"), QStringLiteral("文章标题："),
-        QLineEdit::Normal, QStringLiteral("文章 %1").arg(pProject->vecArticles.size() + 1), &bOk);
+        QLineEdit::Normal, QStringLiteral("文章 %1").arg(rWalkthrough.vecArticles.size() + 1), &bOk);
     if(!bOk || strTitle.trimmed().isEmpty()) {
         return;
     }
@@ -355,10 +370,11 @@ void ProjectTreePanel::onAddArticle()
     article.strId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     article.strTitle = strTitle.trimmed();
     article.strMarkdown = QStringLiteral("# %1\n\n").arg(article.strTitle);
-    pProject->vecArticles.append(article);
+    rWalkthrough.vecArticles.append(article);
     m_pProjectManager->setDirty();
     rebuildProjectTree();
-    selectNodeByKey(QStringLiteral("A%1").arg(pProject->vecArticles.size() - 1));
+    selectNodeByKey(QStringLiteral("%1:A%2").arg(nWalkthroughIndex)
+                        .arg(rWalkthrough.vecArticles.size() - 1));
     emit projectStructureChanged();
 }
 
@@ -372,13 +388,19 @@ void ProjectTreePanel::onRenameNode()
     QString strOldName;
     if(strKey.isEmpty()) {
         strOldName = pProject->strName;
-    } else if(strKey.startsWith(QLatin1Char('A'))) {
-        // 文章节点
-        const int nArticleIndex = strKey.mid(1).toInt();
-        if(nArticleIndex < 0 || nArticleIndex >= pProject->vecArticles.size()) {
+    } else if(strKey.contains(QStringLiteral(":A"))) {
+        // 文章节点（键格式 "W:A文章索引"）
+        const QStringList parts = strKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
             return;
         }
-        strOldName = pProject->vecArticles.at(nArticleIndex).strTitle;
+        const int nArticleIndex = parts.at(1).mid(1).toInt();   // 去掉 "A" 前缀
+        const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+        if(nArticleIndex < 0 || nArticleIndex >= rWalkthrough.vecArticles.size()) {
+            return;
+        }
+        strOldName = rWalkthrough.vecArticles.at(nArticleIndex).strTitle;
     } else {
         const QStringList parts = strKey.split(QLatin1Char(':'));
         const int nWalkthroughIndex = parts.at(0).toInt();
@@ -405,10 +427,15 @@ void ProjectTreePanel::onRenameNode()
     }
     if(strKey.isEmpty()) {
         pProject->strName = strNewName.trimmed();
-    } else if(strKey.startsWith(QLatin1Char('A'))) {
-        const int nArticleIndex = strKey.mid(1).toInt();
-        if(nArticleIndex >= 0 && nArticleIndex < pProject->vecArticles.size()) {
-            pProject->vecArticles[nArticleIndex].strTitle = strNewName.trimmed();
+    } else if(strKey.contains(QStringLiteral(":A"))) {
+        const QStringList parts = strKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        const int nArticleIndex = parts.at(1).mid(1).toInt();
+        if(nWalkthroughIndex >= 0 && nWalkthroughIndex < pProject->vecWalkthroughs.size()) {
+            Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+            if(nArticleIndex >= 0 && nArticleIndex < rWalkthrough.vecArticles.size()) {
+                rWalkthrough.vecArticles[nArticleIndex].strTitle = strNewName.trimmed();
+            }
         }
     } else {
         const QStringList parts = strKey.split(QLatin1Char(':'));
@@ -438,19 +465,25 @@ void ProjectTreePanel::onDeleteNode()
         return;
     }
 
-    // 文章节点单独处理（键以 A 开头）
-    if(strKey.startsWith(QLatin1Char('A'))) {
-        const int nArticleIndex = strKey.mid(1).toInt();
-        if(nArticleIndex < 0 || nArticleIndex >= pProject->vecArticles.size()) {
+    // 文章节点单独处理（键含 ":A"）
+    if(strKey.contains(QStringLiteral(":A"))) {
+        const QStringList parts = strKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+            return;
+        }
+        Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+        const int nArticleIndex = parts.at(1).mid(1).toInt();
+        if(nArticleIndex < 0 || nArticleIndex >= rWalkthrough.vecArticles.size()) {
             return;
         }
         const QString strConfirm = QStringLiteral("确定删除文章「%1」？")
-                                       .arg(pProject->vecArticles.at(nArticleIndex).strTitle);
+                                       .arg(rWalkthrough.vecArticles.at(nArticleIndex).strTitle);
         if(QMessageBox::question(this, QStringLiteral("删除"), strConfirm,
                                  QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
             return;
         }
-        pProject->vecArticles.removeAt(nArticleIndex);
+        rWalkthrough.vecArticles.removeAt(nArticleIndex);
         m_pProjectManager->setDirty();
         rebuildProjectTree();
         emit projectStructureChanged();
