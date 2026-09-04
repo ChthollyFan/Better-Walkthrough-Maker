@@ -693,6 +693,9 @@ void MainWindow::onProjectOpened()
     m_pAssetPanel->refreshAssetList();
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("已打开项目：%1").arg(m_pProjectManager->projectDirectory()), 5000);
+    // 更新文章编辑器的项目上下文（页面引用渲染需要 Project 指针）
+    m_pArticleEditor->setProjectContext(m_pProjectManager->project(),
+                                        ThemeManager::currentTheme().backgroundColor);
     // 自动选中第一个攻略的首页，打开项目即有画面
     const Project* pProject = m_pProjectManager->project();
     if(pProject && !pProject->vecWalkthroughs.isEmpty()
@@ -816,6 +819,9 @@ void MainWindow::applyTheme()
     m_pScene->setPageBackgroundColor(theme.backgroundColor);
     m_pView->viewport()->update();
     updateCanvasEditor();
+    // 同步文章编辑器的背景色（页面引用渲染用）
+    m_pArticleEditor->setProjectContext(m_pProjectManager->project(),
+                                        theme.backgroundColor);
 }
 
 void MainWindow::applyUiStyle()

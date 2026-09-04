@@ -6,13 +6,19 @@
 #include "app/panels/ArticleEditor.h"
 
 #include "app/panels/MarkdownPreview.h"
+#include "core/Project.h"
 #include "project/ProjectManager.h"
 
 #include <QAction>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QListWidgetItem>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QSplitter>
 #include <QTextEdit>
 #include <QTimer>
@@ -37,6 +43,7 @@ ArticleEditor::ArticleEditor(QWidget* pParent, ProjectManager* pProjectManager)
     // 设置项目目录给预览控件（图片路径解析用）
     if(m_pProjectManager && m_pProjectManager->hasProject()) {
         m_pPreview->setProjectDirectory(m_pProjectManager->projectDirectory());
+        m_pPreview->setProject(m_pProjectManager->project(), Qt::white);
     }
 
     // 源码编辑器：等宽字体，适合编辑 Markdown
@@ -98,6 +105,15 @@ void ArticleEditor::createToolBar()
 
     // 工具栏放到顶部
     static_cast<QVBoxLayout*>(layout())->insertWidget(0, pToolBar);
+}
+
+void ArticleEditor::setProjectContext(const Project* pProject, const QColor& rBackgroundColor)
+{
+    m_pPreview->setProject(pProject, rBackgroundColor);
+    // 同时更新项目目录（图片路径解析用），避免打开项目前目录为空
+    if(m_pProjectManager && m_pProjectManager->hasProject()) {
+        m_pPreview->setProjectDirectory(m_pProjectManager->projectDirectory());
+    }
 }
 
 void ArticleEditor::loadArticle(const Article& rArticle)
@@ -246,30 +262,53 @@ void ArticleEditor::onInsertImage()
 
 void ArticleEditor::onInsertPageRef()
 {
-    // 第三期会实现图形化的页面选择器；本期用简单的文本输入
-    bool bOk = false;
-    const QString strRef = QInputDialog::getText(
-        this, QStringLiteral("插入页面引用"),
-        QStringLiteral("页面引用（格式 W:P，如 0:1 表示第0个攻略第1页）："),
-        QLineEdit::Normal, QStringLiteral("0:0"), &bOk);
-    if(!bOk || strRef.isEmpty()) {
+    if(!m_pProjectManager || !m_pProjectManager->hasProject()) {
+        QMessageBox::information(this, QStringLiteral("插入页面引用"),
+                                 QStringLiteral("请先打开项目"));
         return;
     }
-    // 验证格式
-    const QStringList parts = strRef.split(QLatin1Char(':'));
-    if(parts.size() != 2) {
-        QMessageBox::warning(this, QStringLiteral("格式错误"),
-                             QStringLiteral("请输入 W:P 格式，如 0:1"));
+    const Project* pProject = m_pProjectManager->project();
+
+    // 弹出页面选择对话框：列出所有攻略的所有页面
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("选择要引用的页面"));
+    dialog.resize(360, 400);
+    auto* pLayout = new QVBoxLayout(&dialog);
+    auto* pList = new QListWidget(&dialog);
+
+    for(int nW = 0; nW < pProject->vecWalkthroughs.size(); ++nW) {
+        const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nW);
+        for(int nP = 0; nP < rWalkthrough.vecPages.size(); ++nP) {
+            const QString strLabel = QStringLiteral("%1 - %2（第%3页）")
+                                         .arg(rWalkthrough.strTitle)
+                                         .arg(rWalkthrough.vecPages.at(nP).strName)
+                                         .arg(nP);
+            auto* pItem = new QListWidgetItem(strLabel);
+            // UserRole 存 "W:P" 格式
+            pItem->setData(Qt::UserRole, QStringLiteral("%1:%2").arg(nW).arg(nP));
+            pList->addItem(pItem);
+        }
+    }
+
+    if(pList->count() == 0) {
+        QMessageBox::information(this, QStringLiteral("插入页面引用"),
+                                 QStringLiteral("项目中没有图文攻略页面，无法引用"));
         return;
     }
-    bool bWOk = false, bPOk = false;
-    parts.at(0).toInt(&bWOk);
-    parts.at(1).toInt(&bPOk);
-    if(!bWOk || !bPOk) {
-        QMessageBox::warning(this, QStringLiteral("格式错误"),
-                             QStringLiteral("W 和 P 必须是数字"));
+    pList->setCurrentRow(0);
+    pLayout->addWidget(pList);
+
+    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("插入"));
+    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    pLayout->addWidget(pButtons);
+
+    if(dialog.exec() != QDialog::Accepted || !pList->currentItem()) {
         return;
     }
+    const QString strRef = pList->currentItem()->data(Qt::UserRole).toString();
     QTextCursor cursor = m_pSourceEdit->textCursor();
     cursor.insertText(QStringLiteral("![[%1]]").arg(strRef));
 }

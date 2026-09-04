@@ -2,22 +2,42 @@
  * @file MarkdownPreview.cpp
  * @author zhangweimu
  * @brief Markdown 预览控件实现。
+ *
+ * 图片渲染机制：
+ * - setMarkdown 后遍历 document 中所有 QTextImageFormat，获取实际 URL，
+ *   按 URL 加载图片并注册到 document 的 ImageResource。
+ * - 页面引用 ![[W:P]] 先替换为 ![](bwm://page/W/P)，setMarkdown 后渲染页面并注册。
+ * - 大图片（含页面引用）限制最大显示宽度为预览区宽度，避免撑满。
  */
 #include "app/panels/MarkdownPreview.h"
+
+#include "core/Article.h"
+#include "core/Project.h"
+#include "export/ExportRenderer.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QRegularExpression>
+#include <QTextBlock>
+#include <QTextCursor>
+#include <QTextDocumentFragment>
+#include <QTextImageFormat>
 #include <QUrl>
 
 namespace bwm {
+
+// 页面引用正则：匹配 ![[W:P]]，捕获组 1=W，捕获组 2=P
+static const QRegularExpression kPageRefRegex(kPageRefPattern);
 
 MarkdownPreview::MarkdownPreview(QWidget* pParent)
     : QTextBrowser(pParent)
 {
     setOpenExternalLinks(true);
     setReadOnly(true);
+    // 开启文字/图片随控件宽度自动换行
+    setLineWrapMode(QTextBrowser::WidgetWidth);
 }
 
 void MarkdownPreview::setProjectDirectory(const QString& strDir)
@@ -25,41 +45,121 @@ void MarkdownPreview::setProjectDirectory(const QString& strDir)
     m_strProjectDirectory = strDir;
 }
 
+void MarkdownPreview::setProject(const Project* pProject, const QColor& rBackgroundColor)
+{
+    m_pProject = pProject;
+    m_backgroundColor = rBackgroundColor;
+}
+
 void MarkdownPreview::setMarkdownSource(const QString& strMarkdown)
 {
-    // QTextBrowser::setMarkdown 解析 CommonMark + GFM 并渲染为富文本
-    document()->setMarkdown(strMarkdown);
+    // 第一步：解析页面引用 ![[W:P]]，替换为 ![](bwm://page/W/P) 图片语法
+    QString strResolved = strMarkdown;
+    QVector<QPair<int, int>> vecPageRefs;
+
+    if(m_pProject) {
+        QRegularExpressionMatchIterator it = kPageRefRegex.globalMatch(strMarkdown);
+        QVector<QRegularExpressionMatch> vecMatches;
+        while(it.hasNext()) {
+            vecMatches.append(it.next());
+        }
+        for(int i = vecMatches.size() - 1; i >= 0; --i) {
+            const QRegularExpressionMatch& rMatch = vecMatches.at(i);
+            const int nW = rMatch.captured(1).toInt();
+            const int nP = rMatch.captured(2).toInt();
+            const QUrl resourceUrl(QStringLiteral("bwm://page/%1/%2").arg(nW).arg(nP));
+            const QString strImageMarkdown = QStringLiteral("![页面%1:%2](%3)")
+                                                 .arg(nW).arg(nP).arg(resourceUrl.toString());
+            strResolved.replace(rMatch.capturedStart(), rMatch.capturedLength(), strImageMarkdown);
+            vecPageRefs.append({nW, nP});
+        }
+    }
+
+    // 第二步：setMarkdown 渲染（重建 document 内容）
+    document()->setMarkdown(strResolved);
+
+    // 第三步：注册页面引用图片 resource
+    for(const auto& rRef : vecPageRefs) {
+        const QImage image = renderPageRef(rRef.first, rRef.second);
+        if(!image.isNull()) {
+            const QUrl resourceUrl(QStringLiteral("bwm://page/%1/%2")
+                                       .arg(rRef.first).arg(rRef.second));
+            document()->addResource(QTextDocument::ImageResource, resourceUrl, image);
+        }
+    }
+
+    // 第四步：遍历 document 中所有图片，加载并注册普通图片 resource，
+    //         同时限制图片最大显示宽度。
+    const int nMaxImageWidth = viewport()->width() - 40;   // 预留边距
+    for(QTextBlock block = document()->firstBlock(); block.isValid(); block = block.next()) {
+        for(QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
+            QTextFragment fragment = it.fragment();
+            if(!fragment.isValid()) {
+                continue;
+            }
+            QTextCharFormat charFormat = fragment.charFormat();
+            if(!charFormat.isImageFormat()) {
+                continue;
+            }
+            QTextImageFormat imageFormat = charFormat.toImageFormat();
+            const QString strName = imageFormat.name();
+            const QUrl url(strName);
+
+            // 跳过已注册的页面引用图片（bwm:// 协议）
+            if(url.scheme() != QStringLiteral("bwm")) {
+                // 加载普通图片
+                QString strPath = url.path();
+                if(strPath.isEmpty()) {
+                    strPath = strName;
+                }
+                QFileInfo info(strPath);
+                if(info.isRelative() && !m_strProjectDirectory.isEmpty()) {
+                    strPath = QDir(m_strProjectDirectory).filePath(strPath);
+                }
+                QFile file(strPath);
+                if(file.open(QIODevice::ReadOnly)) {
+                    QImage image;
+                    if(image.loadFromData(file.readAll())) {
+                        document()->addResource(QTextDocument::ImageResource, url, image);
+                    }
+                }
+            }
+
+            // 限制图片最大宽度
+            if(nMaxImageWidth > 100) {
+                const int nCurrentWidth = imageFormat.width();
+                if(nCurrentWidth <= 0 || nCurrentWidth > nMaxImageWidth) {
+                    QTextCursor cursor(block);
+                    cursor.setPosition(fragment.position());
+                    cursor.setPosition(fragment.position() + fragment.length(),
+                                        QTextCursor::KeepAnchor);
+                    imageFormat.setWidth(nMaxImageWidth);
+                    cursor.setCharFormat(imageFormat);
+                }
+            }
+        }
+    }
 }
 
 QVariant MarkdownPreview::loadResource(int nType, const QUrl& rName)
 {
-    // 仅处理图片类型资源
-    if(nType != QTextDocument::ImageResource) {
-        return QTextBrowser::loadResource(nType, rName);
-    }
-
-    // 解析图片路径：支持相对路径（assets/xxx.png）和绝对路径
-    QString strPath = rName.path();
-    if(strPath.isEmpty()) {
-        strPath = rName.toString();
-    }
-
-    QFileInfo info(strPath);
-    // 相对路径：以项目目录为基准解析
-    if(info.isRelative() && !m_strProjectDirectory.isEmpty()) {
-        strPath = QDir(m_strProjectDirectory).filePath(strPath);
-    }
-
-    QFile file(strPath);
-    if(file.open(QIODevice::ReadOnly)) {
-        QImage image;
-        if(image.loadFromData(file.readAll())) {
-            return image;
-        }
-    }
-
-    // 加载失败时回退到默认处理（显示占位）
     return QTextBrowser::loadResource(nType, rName);
+}
+
+QImage MarkdownPreview::renderPageRef(int nWalkthroughIndex, int nPageIndex)
+{
+    if(!m_pProject
+       || nWalkthroughIndex < 0
+       || nWalkthroughIndex >= m_pProject->vecWalkthroughs.size()) {
+        return QImage();
+    }
+    const Walkthrough& rWalkthrough = m_pProject->vecWalkthroughs.at(nWalkthroughIndex);
+    if(nPageIndex < 0 || nPageIndex >= rWalkthrough.vecPages.size()) {
+        return QImage();
+    }
+    // 用 0.5 倍率渲染，避免预览中页面图片过大
+    return ExportRenderer::renderPage(rWalkthrough.vecPages.at(nPageIndex),
+                                      0.5, m_backgroundColor);
 }
 
 } // namespace bwm
