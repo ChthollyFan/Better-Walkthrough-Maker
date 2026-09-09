@@ -24,12 +24,14 @@
 [![GitHub Release](https://img.shields.io/github/v/release/ChthollyFan/Better-Walkthrough-Maker)](https://github.com/ChthollyFan/Better-Walkthrough-Maker/releases)
 
 - **绿色版 zip**：从 [Releases](https://github.com/ChthollyFan/Better-Walkthrough-Maker/releases) 下载，解压后直接运行 `BetterWalkthroughMaker.exe`（无需安装 Qt）
-- **本地打包**：`powershell -ExecutionPolicy Bypass -File .\deploy.ps1`（生成 `dist/` 下绿色版 zip）
+- **本地打包（文件夹版）**：`powershell -ExecutionPolicy Bypass -File .\deploy.ps1`（生成 `dist/` 下绿色版 zip），或 `pwsh -File package.ps1`（生成 `release/` 目录 + zip）
+- **单文件打包**：`pwsh -File package_single.ps1`（生成 `bwm-single.exe`，单文件免 DLL；需安装 [Enigma Virtual Box](https://enigmaprotector.com/en/downloads.html)）
 - **自动发布**：打标签 `git tag v0.1.0 && git push origin v0.1.0`，GitHub Actions 自动构建（装 Qt → 编译 → 测试 → 打包）并发布到 Releases
 
 ## 文档
 
 - [项目规划](docs/project-plan.md) — 产品定位、数据模型、功能模块、技术架构、里程碑与实现记录
+- [文章攻略设计](docs/article-walkthrough-design.md) — Markdown 文章模块的设计、实现要点与问题复盘
 - [C++ 编码规范](docs/c++编码规范.md) — 代码风格与命名约定（开发前请阅读）
 
 ## 许可证
@@ -47,7 +49,7 @@ cmake -S . -B build -G Ninja "-DCMAKE_PREFIX_PATH=C:/Users/ThinkPad/Qt/6.11.2/mi
 # 编译
 cmake --build build
 
-# 运行测试（4 个测试程序）
+# 运行测试（6 个测试程序）
 $env:PATH = "C:/Users/ThinkPad/Qt/6.11.2/mingw_64/bin;" + $env:PATH
 ctest --test-dir build --output-on-failure
 
@@ -59,6 +61,8 @@ build\src\bwm.exe
 ## 当前状态
 
 - ✅ 规划定稿（`docs/project-plan.md`）
-- ✅ **M1–M6 全部完成**（骨架 / 画布 / 表格与素材库 / 导出 / 模板与美化包 / 打磨）
-- ✅ 单元测试 4 个测试程序全部通过（序列化 / 项目管理 / 导出渲染 / 模板）
+- ✅ **M1–M7 全部完成**（骨架 / 画布 / 表格与素材库 / 导出 / 模板与美化包 / 打磨 / 文章攻略）
+- ✅ 单元测试 6 个测试程序全部通过（序列化 / 项目管理 / 导出渲染 / 模板 / 文章数据 / 文章导入导出）
+- ✅ 文章攻略：Markdown 分栏编辑、`![[W:P]]` 页面引用、导入导出（Markdown / PNG / PDF）、作者署名
+- ✅ 应用图标、导出目录记忆、单文件打包（Enigma Virtual Box）
 - ⏳ 后续：小黑盒图片规格实测、安装包发布、GIF 导出、蒙版/滤镜、模板占位符
