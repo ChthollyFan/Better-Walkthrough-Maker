@@ -105,9 +105,13 @@ ExportDialog::ExportDialog(QWidget* pParent, ProjectManager* pProjectManager,
     }
     pFormLayout->addRow(m_pUi->pAuthorCheck);
 
-    // ---- 导出目录 ----
+    // ---- 导出目录（默认填充上次导出目录）----
     m_pUi->pDirEdit = new QLineEdit(this);
     m_pUi->pDirEdit->setPlaceholderText(QStringLiteral("选择导出目录…"));
+    const QString strLastDir = Settings::lastExportDirectory();
+    if(!strLastDir.isEmpty()) {
+        m_pUi->pDirEdit->setText(strLastDir);
+    }
     auto* pBrowseButton = new QPushButton(QStringLiteral("浏览…"), this);
     connect(pBrowseButton, &QPushButton::clicked, this, [this]() {
         const QString strDir = QFileDialog::getExistingDirectory(
@@ -206,6 +210,7 @@ void ExportDialog::onAccept()
         const int nExported = pProvider->exportArticle(
             rArticle, *pProject, rArticle.strTitle, strExportDir, strAuthor, m_context, this);
         if(nExported > 0) {
+            Settings::setLastExportDirectory(strExportDir);
             accept();
         } else {
             QMessageBox::warning(this, QStringLiteral("导出"), QStringLiteral("导出失败，请检查目录权限"));
@@ -267,6 +272,7 @@ void ExportDialog::onAccept()
         vecPages, strWalkthroughTitle, strExportDir, dScale, strAuthor, m_context, this);
 
     if(nExported > 0) {
+        Settings::setLastExportDirectory(strExportDir);
         accept();   // 关闭对话框
     } else {
         QMessageBox::warning(this, QStringLiteral("导出"), QStringLiteral("导出失败，请检查目录权限"));

@@ -1,0 +1,2 @@
+// Windows 资源脚本：把图标嵌入 exe（资源管理器/任务栏显示）
+IDI_ICON1 ICON "Chtholly.ico"
