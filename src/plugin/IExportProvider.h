@@ -81,6 +81,7 @@ public:
      * @param rProject       所属项目（解析页面引用 ![[W:P]] 需要访问攻略页面）
      * @param rArticleTitle  文章标题（用于生成文件名）
      * @param strDirPath     导出目标目录
+     * @param strAuthor      作者署名（空字符串表示不署名；PNG 导出绘制为水印）
      * @param rContext       插件上下文（提供主题背景色、项目目录等）
      * @param pParent        父窗口
      * @return               导出成功后的文件数量（0 表示失败）
@@ -91,6 +92,7 @@ public:
                                const Project& rProject,
                                const QString& rArticleTitle,
                                const QString& strDirPath,
+                               const QString& strAuthor,
                                const PluginContext& rContext,
                                QWidget* pParent) const
     {
@@ -98,6 +100,7 @@ public:
         (void)rProject;
         (void)rArticleTitle;
         (void)strDirPath;
+        (void)strAuthor;
         (void)rContext;
         (void)pParent;
         return 0;

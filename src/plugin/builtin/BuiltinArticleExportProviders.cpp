@@ -49,9 +49,11 @@ int ArticleMarkdownExportProvider::exportArticle(const Article& rArticle,
                                                    const Project& rProject,
                                                    const QString& rArticleTitle,
                                                    const QString& strDirPath,
+                                                   const QString& strAuthor,
                                                    const PluginContext& rContext,
                                                    QWidget* pParent) const
 {
+    (void)strAuthor;   // Markdown 导出保持原文纯净，不追加署名
     const QString strSafeName = ArticleRenderer::sanitizeFileName(rArticleTitle);
     if(strSafeName.isEmpty()) {
         return 0;
@@ -181,6 +183,7 @@ int ArticlePngExportProvider::exportArticle(const Article& rArticle,
                                               const Project& rProject,
                                               const QString& rArticleTitle,
                                               const QString& strDirPath,
+                                              const QString& strAuthor,
                                               const PluginContext& rContext,
                                               QWidget* pParent) const
 {
@@ -212,6 +215,9 @@ int ArticlePngExportProvider::exportArticle(const Article& rArticle,
     QPainter painter(&image);
     pDocument->drawContents(&painter);
     painter.end();
+
+    // 作者署名水印（右下角，半透明）；署名大小随图片宽度缩放
+    ExportRenderer::drawAuthorMark(image, strAuthor, image.width() / 720.0);
 
     // 写 PNG
     const QString strSafeName = ArticleRenderer::sanitizeFileName(rArticleTitle);
@@ -248,12 +254,26 @@ int ArticlePdfExportProvider::exportArticle(const Article& rArticle,
                                               const Project& rProject,
                                               const QString& rArticleTitle,
                                               const QString& strDirPath,
+                                              const QString& strAuthor,
                                               const PluginContext& rContext,
                                               QWidget* pParent) const
 {
     const int nImageWidth = 800;   // PDF 页面较窄，适合阅读
     QScopedPointer<QTextDocument> pDocument(
         ArticleRenderer::buildDocument(rArticle, rProject, rContext, nImageWidth));
+
+    // 作者署名：在文档末尾追加一行（字号约为正文的 3/4，颜色跟随主题）
+    if(!strAuthor.trimmed().isEmpty()) {
+        QTextCursor cursor(pDocument.data());
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertBlock();
+        QTextCharFormat authorFormat;
+        authorFormat.setForeground(rContext.theme.textColor);
+        QFont authorFont = pDocument->defaultFont();
+        authorFont.setPixelSize(qMax(12, authorFont.pixelSize() * 3 / 4));
+        authorFormat.setFont(authorFont);
+        cursor.insertText(QStringLiteral("— by %1").arg(strAuthor), authorFormat);
+    }
 
     const QString strSafeName = ArticleRenderer::sanitizeFileName(rArticleTitle);
     const QString strFilePath = QDir(strDirPath).filePath(

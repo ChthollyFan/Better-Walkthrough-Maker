@@ -27,6 +27,7 @@ public:
                        const Project& rProject,
                        const QString& rArticleTitle,
                        const QString& strDirPath,
+                       const QString& strAuthor,
                        const PluginContext& rContext,
                        QWidget* pParent) const override;
     // 页面型导出不支持，返回 0
@@ -49,6 +50,7 @@ public:
                        const Project& rProject,
                        const QString& rArticleTitle,
                        const QString& strDirPath,
+                       const QString& strAuthor,
                        const PluginContext& rContext,
                        QWidget* pParent) const override;
     int exportPages(const QVector<Page>&, const QString&, const QString&,
@@ -70,6 +72,7 @@ public:
                        const Project& rProject,
                        const QString& rArticleTitle,
                        const QString& strDirPath,
+                       const QString& strAuthor,
                        const PluginContext& rContext,
                        QWidget* pParent) const override;
     int exportPages(const QVector<Page>&, const QString&, const QString&,

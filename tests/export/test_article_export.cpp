@@ -36,6 +36,7 @@ private slots:
     void testBuildDocument();
     void testMarkdownExport();
     void testPngExport();
+    void testPngAuthorMark();
     void testPngTextVisibleInDarkTheme();
     void testPdfExport();
     void testSanitizeFileName();
@@ -208,7 +209,7 @@ void TestArticleExport::testMarkdownExport()
     QVERIFY(provider.supportsArticle());
 
     const int nExported = provider.exportArticle(
-        article, project, article.strTitle, strExportDir, ctx, nullptr);
+        article, project, article.strTitle, strExportDir, QString(), ctx, nullptr);
 
     QCOMPARE(nExported, 1);
 
@@ -243,7 +244,7 @@ void TestArticleExport::testPngExport()
     QVERIFY(provider.supportsArticle());
 
     const int nExported = provider.exportArticle(
-        article, project, article.strTitle, strExportDir, ctx, nullptr);
+        article, project, article.strTitle, strExportDir, QString(), ctx, nullptr);
 
     QCOMPARE(nExported, 1);
 
@@ -255,6 +256,60 @@ void TestArticleExport::testPngExport()
     QVERIFY(!image.isNull());
     QCOMPARE(image.width(), 1080);   // 长图固定宽度
     QVERIFY(image.height() > 50);
+}
+
+void TestArticleExport::testPngAuthorMark()
+{
+    // 指定作者时，PNG 右下角应绘制署名水印（存在非背景色像素）；
+    // 不指定作者时，右下角应与背景一致。
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const Project project = makeProject();
+    const Article article = makeArticle();
+
+    PluginContext ctx = makeContext(tempDir.path());
+    ctx.theme.backgroundColor = QColor(30, 30, 46);
+    ctx.theme.textColor = QColor(237, 237, 237);
+
+    // 统计图片右下角区域的非背景像素数
+    auto countMarkPixels = [](const QImage& rImage, const QColor& rBackground) {
+        const QRect markArea(rImage.width() * 3 / 5, rImage.height() * 4 / 5,
+                             rImage.width() * 2 / 5, rImage.height() / 5);
+        int nCount = 0;
+        for(int y = markArea.top(); y < markArea.bottom() && y < rImage.height(); ++y) {
+            for(int x = markArea.left(); x < markArea.right() && x < rImage.width(); ++x) {
+                if(rImage.pixel(x, y) != rBackground.rgb()) {
+                    ++nCount;
+                }
+            }
+        }
+        return nCount;
+    };
+
+    // ---- 无署名 ----
+    const QString strDirNoAuthor = QDir(tempDir.path()).filePath(QStringLiteral("no_author"));
+    QDir().mkpath(strDirNoAuthor);
+    ArticlePngExportProvider provider;
+    QCOMPARE(provider.exportArticle(article, project, QStringLiteral("无署名"),
+                                    strDirNoAuthor, QString(), ctx, nullptr), 1);
+    const QImage imageNoAuthor(QDir(strDirNoAuthor).filePath(QStringLiteral("无署名.png")));
+    QVERIFY(!imageNoAuthor.isNull());
+    const int nPixelsNoAuthor = countMarkPixels(imageNoAuthor, ctx.theme.backgroundColor);
+
+    // ---- 有署名 ----
+    const QString strDirWithAuthor = QDir(tempDir.path()).filePath(QStringLiteral("with_author"));
+    QDir().mkpath(strDirWithAuthor);
+    QCOMPARE(provider.exportArticle(article, project, QStringLiteral("有署名"),
+                                    strDirWithAuthor, QStringLiteral("测试作者"), ctx, nullptr), 1);
+    const QImage imageWithAuthor(QDir(strDirWithAuthor).filePath(QStringLiteral("有署名.png")));
+    QVERIFY(!imageWithAuthor.isNull());
+    const int nPixelsWithAuthor = countMarkPixels(imageWithAuthor, ctx.theme.backgroundColor);
+
+    // 有署名的右下角区域应有更多非背景像素
+    QVERIFY2(nPixelsWithAuthor > nPixelsNoAuthor,
+             qPrintable(QStringLiteral("署名未绘制：无署名 %1 像素，有署名 %2 像素")
+                            .arg(nPixelsNoAuthor).arg(nPixelsWithAuthor)));
 }
 
 void TestArticleExport::testPngTextVisibleInDarkTheme()
@@ -276,7 +331,7 @@ void TestArticleExport::testPngTextVisibleInDarkTheme()
 
     ArticlePngExportProvider provider;
     QCOMPARE(provider.exportArticle(article, project, article.strTitle,
-                                    strExportDir, ctx, nullptr), 1);
+                                    strExportDir, QString(), ctx, nullptr), 1);
 
     const QString strPngPath = QDir(strExportDir).filePath(QStringLiteral("测试文章.png"));
     QVERIFY(QFile::exists(strPngPath));
@@ -316,8 +371,10 @@ void TestArticleExport::testPdfExport()
     ArticlePdfExportProvider provider;
     QVERIFY(provider.supportsArticle());
 
+    // 传署名，验证 PDF 署名路径不崩溃
     const int nExported = provider.exportArticle(
-        article, project, article.strTitle, strExportDir, ctx, nullptr);
+        article, project, article.strTitle, strExportDir, QStringLiteral("测试作者"),
+        ctx, nullptr);
 
     QCOMPARE(nExported, 1);
 

@@ -204,7 +204,7 @@ void ExportDialog::onAccept()
         }
         const Article& rArticle = rWalkthrough.vecArticles.at(nArticleIndex);
         const int nExported = pProvider->exportArticle(
-            rArticle, *pProject, rArticle.strTitle, strExportDir, m_context, this);
+            rArticle, *pProject, rArticle.strTitle, strExportDir, strAuthor, m_context, this);
         if(nExported > 0) {
             accept();
         } else {

@@ -49,8 +49,10 @@ void paintPageComponents(QPainter* pPainter, const Page& rPage, qreal dOffsetY)
     }
 }
 
+} // namespace
+
 // 在图片右下角绘制作者署名（半透明）
-void drawAuthorMark(QImage& rImage, const QString& rAuthor, qreal dScale)
+void ExportRenderer::drawAuthorMark(QImage& rImage, const QString& rAuthor, qreal dScale)
 {
     if (rAuthor.trimmed().isEmpty() || rImage.isNull()) {
         return;
@@ -66,8 +68,6 @@ void drawAuthorMark(QImage& rImage, const QString& rAuthor, qreal dScale)
     painter.drawText(textRect, Qt::AlignRight | Qt::AlignBottom,
                      QStringLiteral("by %1").arg(rAuthor));
 }
-
-} // namespace
 
 QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor& rBackground,
                                   const QString& rAuthor)
