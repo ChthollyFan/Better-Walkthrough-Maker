@@ -9,11 +9,14 @@
 #   2. 已执行 pwsh -File package.ps1（生成 release 目录）
 #   3. 已安装 Enigma Virtual Box（默认路径 D:/software/Enigma Virtual Box）
 #
-# 产物：bwm-single.exe（单文件，双击即可运行，无需 Qt DLL）
+# 产物：BWM.exe（单文件，双击即可运行，无需 Qt DLL）
 
 param(
-    [string]$EnigmaDir = "D:/software/Enigma Virtual Box",
-    [string]$OutputName = "bwm-single.exe"
+    # Enigma 打包工具目录：留空则优先用仓库内 tools/enigmavbconsole.exe，
+    # 回退到本机安装目录（便于本地开发与 CI 保持一致）
+    [string]$EnigmaDir = "",
+    # 输出文件名（发布产物固定为 BWM.exe）
+    [string]$OutputName = "BWM.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,13 +26,19 @@ $release = Join-Path $root "release"
 $mainExe = Join-Path $release "bwm.exe"
 $output  = Join-Path $root $OutputName
 $evbPath = Join-Path $root "build/bwm.evb"
-$console = Join-Path $EnigmaDir "enigmavbconsole.exe"
+
+# 定位 enigmavbconsole.exe：优先仓库内 tools/（CI 与本地一致），回退本机安装
+$console = Join-Path $root "tools/enigmavbconsole.exe"
+if (-not (Test-Path $console)) {
+    if (-not $EnigmaDir) { $EnigmaDir = "D:/software/Enigma Virtual Box" }
+    $console = Join-Path $EnigmaDir "enigmavbconsole.exe"
+}
 
 Write-Host "=== 1. 检查前置条件 ===" -ForegroundColor Cyan
 if (-not (Test-Path $mainExe)) { throw "找不到 $mainExe -- 请先执行 pwsh -File package.ps1" }
-if (-not (Test-Path $console)) { throw "找不到 $console -- 请检查 -EnigmaDir 参数" }
+if (-not (Test-Path $console)) { throw "找不到 enigmavbconsole.exe -- 请检查 tools/ 或 -EnigmaDir 参数" }
 Write-Host "  release/bwm.exe OK"
-Write-Host "  enigmavbconsole.exe OK"
+Write-Host "  enigmavbconsole.exe OK ($console)"
 
 # XML 特殊字符转义
 function Esc([string]$s) {
@@ -93,3 +102,4 @@ Write-Host ""
 Write-Host "=== 完成 ===" -ForegroundColor Green
 Write-Host "  单文件 exe: $output ($size MB)"
 Write-Host "  双击即可运行（无需 Qt DLL）"
+Write-Host "  发布时将此文件上传到 GitHub Releases"

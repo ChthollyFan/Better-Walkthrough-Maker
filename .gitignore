@@ -8,6 +8,7 @@ release/
 
 # 单文件打包产物（Enigma Virtual Box）
 bwm-single.exe
+BWM.exe
 
 # 工具日志
 aqtinstall.log
