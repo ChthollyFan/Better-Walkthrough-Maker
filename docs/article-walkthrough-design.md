@@ -121,11 +121,13 @@ struct Walkthrough {
 
 ### 5.2 导出 Provider（src/plugin/builtin/BuiltinArticleExportProviders.*）
 
-| 格式 | formatId | 产物 |
-|---|---|---|
-| Markdown 文件 | `article.markdown` | `文章名.md`（原样，保留 `![[W:P]]`）+ `文章名_compatible.md`（引用替换为图片）+ `images/`（页面渲染图 + 素材副本） |
-| PNG 长图 | `article.png.longimage` | `文章名.png`，宽 1080，高度自适应 |
-| PDF 文档 | `article.pdf` | `文章名.pdf`，A4 自动分页 |
+| 格式 | formatId | 产物 | 署名 |
+|---|---|---|---|
+| Markdown 文件 | `article.markdown` | `文章名.md`（原样，保留 `![[W:P]]`）+ `文章名_compatible.md`（引用替换为图片）+ `images/`（页面渲染图 + 素材副本） | 无（保持原文纯净） |
+| PNG 长图 | `article.png.longimage` | `文章名.png`，宽 1080，高度自适应 | 右下角半透明水印 |
+| PDF 文档 | `article.pdf` | `文章名.pdf`，A4 自动分页 | 文末署名行 |
+
+署名来自全局设置中的"作者署名"，由导出对话框的"添加作者署名"复选框控制。
 
 ### 5.3 IExportProvider 接口扩展
 
@@ -262,6 +264,8 @@ test_article_export（10 个用例）
 7. **模态对话框阻塞测试**：`showExportResult` 在测试中无人点击导致 90 秒超时 →
    约定 `pParent == nullptr` 时静默。
 8. **链接失败（Permission denied）**：`bwm.exe` 正在运行导致链接器无法写入，编译前需先结束进程。
+9. **作者署名遗漏**：`exportArticle()` 接口最初没有 `strAuthor` 参数，导致文章导出无署名。
+   已补充该参数，PNG 绘制右下角水印（复用 `ExportRenderer::drawAuthorMark`），PDF 在文末追加署名行。
 
 ## 十、后续可扩展方向
 
