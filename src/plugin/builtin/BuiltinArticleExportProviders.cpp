@@ -16,6 +16,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QMessageBox>
 #include <QPainter>
 #include <QAbstractTextDocumentLayout>
 #include <QPrinter>
@@ -193,6 +194,16 @@ int ArticlePngExportProvider::exportArticle(const Article& rArticle,
     qreal dHeight = docSize.height();
     if(dHeight < 100) {
         dHeight = 100;   // 防止空文档
+    }
+
+    // 高度上限检测（与图文长图一致）：QImage 尺寸受限（约 32767px），
+    // 超出时明确提示而非静默失败。
+    constexpr int nMaxLongImageHeight = 30000;
+    if(dHeight > nMaxLongImageHeight) {
+        QMessageBox::warning(pParent, QStringLiteral("导出 PNG 长图"),
+                             QStringLiteral("文章过长（%1px，上限 %2px），请拆分文章后导出")
+                                 .arg(int(dHeight)).arg(nMaxLongImageHeight));
+        return 0;
     }
 
     // 渲染到 QImage
