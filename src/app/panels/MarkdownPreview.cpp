@@ -20,11 +20,13 @@
 #include <QFileInfo>
 #include <QImage>
 #include <QRegularExpression>
+#include <QScrollBar>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocumentFragment>
 #include <QTextImageFormat>
 #include <QUrl>
+#include <QWheelEvent>
 
 namespace bwm {
 
@@ -53,12 +55,18 @@ void MarkdownPreview::setProject(const Project* pProject, const QColor& rBackgro
 
 void MarkdownPreview::setMarkdownSource(const QString& strMarkdown)
 {
+    m_strSource = strMarkdown;
+    renderContent();
+}
+
+void MarkdownPreview::renderContent()
+{
     // 第一步：解析页面引用 ![[W:P]]，替换为 ![](bwm://page/W/P) 图片语法
-    QString strResolved = strMarkdown;
+    QString strResolved = m_strSource;
     QVector<QPair<int, int>> vecPageRefs;
 
     if(m_pProject) {
-        QRegularExpressionMatchIterator it = kPageRefRegex.globalMatch(strMarkdown);
+        QRegularExpressionMatchIterator it = kPageRefRegex.globalMatch(m_strSource);
         QVector<QRegularExpressionMatch> vecMatches;
         while(it.hasNext()) {
             vecMatches.append(it.next());
@@ -78,6 +86,17 @@ void MarkdownPreview::setMarkdownSource(const QString& strMarkdown)
     // 第二步：setMarkdown 渲染（重建 document 内容）
     document()->setMarkdown(strResolved);
 
+    // 应用缩放：字号随 Ctrl+滚轮缩放（图片宽度在第四步同步缩放）
+    QFont docFont = document()->defaultFont();
+    if(m_nBaseFontSize <= 0) {
+        // 首次渲染时记录基准字号（pixelSize 无效时按 pointSize 换算）
+        m_nBaseFontSize = docFont.pixelSize() > 0
+            ? docFont.pixelSize()
+            : qMax(8, qRound(docFont.pointSizeF() * 1.333));
+    }
+    docFont.setPixelSize(qMax(6, qRound(m_nBaseFontSize * m_dZoom)));
+    document()->setDefaultFont(docFont);
+
     // 第三步：注册页面引用图片 resource
     for(const auto& rRef : vecPageRefs) {
         const QImage image = renderPageRef(rRef.first, rRef.second);
@@ -89,8 +108,8 @@ void MarkdownPreview::setMarkdownSource(const QString& strMarkdown)
     }
 
     // 第四步：遍历 document 中所有图片，加载并注册普通图片 resource，
-    //         同时限制图片最大显示宽度。
-    const int nMaxImageWidth = viewport()->width() - 40;   // 预留边距
+    //         同时按缩放因子设置显示宽度（与文字同步缩放）。
+    const int nMaxImageWidth = qMax(50, qRound((viewport()->width() - 40) * m_dZoom));
     for(QTextBlock block = document()->firstBlock(); block.isValid(); block = block.next()) {
         for(QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
             QTextFragment fragment = it.fragment();
@@ -144,6 +163,29 @@ void MarkdownPreview::setMarkdownSource(const QString& strMarkdown)
 QVariant MarkdownPreview::loadResource(int nType, const QUrl& rName)
 {
     return QTextBrowser::loadResource(nType, rName);
+}
+
+void MarkdownPreview::wheelEvent(QWheelEvent* pEvent)
+{
+    // Ctrl+滚轮：整体缩放（文字与图片同步），并保持相对滚动位置
+    if(pEvent->modifiers() & Qt::ControlModifier) {
+        const int nDelta = pEvent->angleDelta().y();
+        if(nDelta != 0) {
+            const qreal dOldZoom = m_dZoom;
+            m_dZoom = qBound(0.3, m_dZoom * (nDelta > 0 ? 1.1 : 1.0 / 1.1), 5.0);
+            if(!qFuzzyCompare(dOldZoom, m_dZoom)) {
+                QScrollBar* pScrollBar = verticalScrollBar();
+                const int nOldMax = pScrollBar->maximum();
+                const qreal dRatio = nOldMax > 0
+                    ? qreal(pScrollBar->value()) / nOldMax : 0.0;
+                renderContent();
+                pScrollBar->setValue(qRound(dRatio * pScrollBar->maximum()));
+            }
+        }
+        pEvent->accept();
+        return;
+    }
+    QTextBrowser::wheelEvent(pEvent);
 }
 
 QImage MarkdownPreview::renderPageRef(int nWalkthroughIndex, int nPageIndex)

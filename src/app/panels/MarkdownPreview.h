@@ -54,16 +54,21 @@ public:
 protected:
     // 重写：解析 assets/ 相对路径与 bwm://page/ 协议，加载对应图片
     QVariant loadResource(int nType, const QUrl& rName) override;
+    // 重写：Ctrl+滚轮整体缩放（文字与图片同步缩放）
+    void wheelEvent(QWheelEvent* pEvent) override;
 
 private:
-    // 解析 ![[W:P]] 标记，渲染页面并注册为 resource，返回替换后的 Markdown
-    QString resolvePageRefs(const QString& strMarkdown);
+    // 用当前源码与缩放因子重新渲染（setMarkdownSource 与缩放共用）
+    void renderContent();
     // 渲染指定页面为 QImage 并注册到 document
     QImage renderPageRef(int nWalkthroughIndex, int nPageIndex);
 
-    QString m_strProjectDirectory;   ///< 项目目录（解析图片相对路径用）
+    QString m_strSource;                   ///< 原始 Markdown 源码（缩放时重新渲染用）
+    QString m_strProjectDirectory;         ///< 项目目录（解析图片相对路径用）
     const Project* m_pProject = nullptr;   ///< 项目指针（渲染页面引用用）
     QColor m_backgroundColor = Qt::white;  ///< 页面渲染背景色（跟随主题）
+    qreal m_dZoom = 1.0;                   ///< 缩放因子（Ctrl+滚轮，0.3~5.0）
+    int m_nBaseFontSize = 0;               ///< 基准字号（像素），首次渲染时确定
 };
 
 } // namespace bwm

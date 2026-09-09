@@ -53,6 +53,8 @@ protected:
     void closeEvent(QCloseEvent* pEvent) override;
     // 窗口首次可见后重新应用 UI 风格（DWM 亚克力需窗口有可见区域后才生效）
     void showEvent(QShowEvent* pEvent) override;
+    // 右键弹出菜单：仅当在"插入"菜单项上右键时，返回插入工具栏的显示切换菜单
+    QMenu* createPopupMenu() override;
 
 private slots:
     // 文件操作
@@ -159,6 +161,7 @@ private:
 
     // ---- UI 控件 ----
     QMenu* m_pRecentProjectsMenu = nullptr;       ///< 最近项目菜单
+    QMenu* m_pInsertMenu = nullptr;               ///< 插入菜单（其菜单项右键可切换工具栏显示）
     QToolBar* m_pToolBar = nullptr;               ///< 工具栏
 
     // ---- 状态标志 ----

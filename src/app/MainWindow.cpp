@@ -160,7 +160,7 @@ void MainWindow::createMenus()
     pAutoSaveAction->setChecked(true);
     connect(pAutoSaveAction, &QAction::toggled, this, &MainWindow::onToggleAutoSave);
 
-    QAction* pExportAction = pFileMenu->addAction(QStringLiteral("导出 PNG(&E)…"));
+    QAction* pExportAction = pFileMenu->addAction(QStringLiteral("导出(&E)…"));
     pExportAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
     connect(pExportAction, &QAction::triggered, this, &MainWindow::onExportPng);
 
@@ -203,7 +203,8 @@ void MainWindow::createMenus()
             m_pTreePanel, &ProjectTreePanel::onExportTemplate);
 
     // ---- 插入菜单（从 PluginHost 动态构建）----
-    QMenu* pInsertMenu = menuBar()->addMenu(QStringLiteral("插入(&I)"));
+    m_pInsertMenu = menuBar()->addMenu(QStringLiteral("插入(&I)"));
+    QMenu* pInsertMenu = m_pInsertMenu;
     // 遍历所有组件类型 Provider，按 menuPath 构建子菜单
     for(const IComponentProvider* pProvider : m_pHost->componentProviders()) {
         QAction* pAction = pInsertMenu->addAction(pProvider->displayName());
@@ -390,6 +391,25 @@ void MainWindow::createToolBar()
     m_pToolBar->addSeparator();
     QAction* pDeleteAction = m_pToolBar->addAction(QStringLiteral("删除选中"));
     connect(pDeleteAction, &QAction::triggered, this, &MainWindow::onDeleteSelected);
+
+    // 默认隐藏：通过右键"插入"菜单项切换显示（见 createPopupMenu）
+    m_pToolBar->setVisible(false);
+    QAction* pToggleAction = m_pToolBar->toggleViewAction();
+    pToggleAction->setText(QStringLiteral("显示插入工具栏"));
+}
+
+QMenu* MainWindow::createPopupMenu()
+{
+    // 仅在"插入"菜单项上右键时，返回插入工具栏的显示切换菜单；
+    // 菜单栏其他位置右键不弹菜单（避免误触）。
+    const QPoint localPos = menuBar()->mapFromGlobal(QCursor::pos());
+    QAction* pHitAction = menuBar()->actionAt(localPos);
+    if(pHitAction && m_pInsertMenu && pHitAction == m_pInsertMenu->menuAction()) {
+        auto* pMenu = new QMenu(this);
+        pMenu->addAction(m_pToolBar->toggleViewAction());
+        return pMenu;
+    }
+    return nullptr;
 }
 
 void MainWindow::createCentralWidget()
@@ -631,7 +651,7 @@ void MainWindow::onShowShortcuts()
                                  "新建项目\tCtrl+N\n"
                                  "打开项目\tCtrl+O\n"
                                  "保存\tCtrl+S\n"
-                                 "导出 PNG\tCtrl+E\n"
+                                 "导出\tCtrl+E\n"
                                  "复制当前页到剪贴板\tCtrl+Shift+C\n"
                                  "\n"
                                  "撤销\tCtrl+Z\n"
