@@ -45,7 +45,7 @@ public:
     virtual QString displayName() const = 0;
 
     /**
-     * @brief 执行导出。
+     * @brief 执行页面型导出（图文攻略）。
      *
      * @param vecPages       要导出的页面列表
      * @param rWalkthroughTitle  当前攻略标题（用于生成文件名）
@@ -65,6 +65,43 @@ public:
                             const QString& strAuthor,
                             const PluginContext& rContext,
                             QWidget* pParent) const = 0;
+
+    /**
+     * @brief 是否支持文章型导出（Markdown 文章）。
+     *
+     * 页面型 Provider 返回 false（不支持），文章型 Provider 返回 true。
+     * ExportDialog 据此过滤可选格式。
+     */
+    virtual bool supportsArticle() const { return false; }
+
+    /**
+     * @brief 执行文章型导出（Markdown 文章）。
+     *
+     * @param rArticle       要导出的文章
+     * @param rProject       所属项目（解析页面引用 ![[W:P]] 需要访问攻略页面）
+     * @param rArticleTitle  文章标题（用于生成文件名）
+     * @param strDirPath     导出目标目录
+     * @param rContext       插件上下文（提供主题背景色、项目目录等）
+     * @param pParent        父窗口
+     * @return               导出成功后的文件数量（0 表示失败）
+     *
+     * 默认实现返回 0（不支持文章导出）。文章型 Provider 必须重写此方法。
+     */
+    virtual int exportArticle(const Article& rArticle,
+                               const Project& rProject,
+                               const QString& rArticleTitle,
+                               const QString& strDirPath,
+                               const PluginContext& rContext,
+                               QWidget* pParent) const
+    {
+        (void)rArticle;
+        (void)rProject;
+        (void)rArticleTitle;
+        (void)strDirPath;
+        (void)rContext;
+        (void)pParent;
+        return 0;
+    }
 };
 
 } // namespace bwm

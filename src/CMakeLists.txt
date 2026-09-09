@@ -8,7 +8,10 @@ add_library(bwm_core STATIC
   core/Project.cpp
   core/ProjectSerializer.cpp
   core/Template.cpp
+  export/ArticleImporter.cpp
+  export/ArticleRenderer.cpp
   export/ExportRenderer.cpp
+  export/ExportResultHelper.cpp
   project/ProjectManager.cpp
   settings/Settings.cpp
   template/BuiltinTemplates.cpp
@@ -22,13 +25,14 @@ add_library(bwm_core STATIC
   plugin/PluginHost.cpp
   # 内置适配器
   plugin/builtin/BuiltinComponentProviders.cpp
+  plugin/builtin/BuiltinArticleExportProviders.cpp
   plugin/builtin/BuiltinExportProviders.cpp
   plugin/builtin/BuiltinTemplateProviders.cpp
   plugin/builtin/BuiltinThemeProviders.cpp
   plugin/builtin/BuiltinPluginRegistrar.cpp
 )
 target_include_directories(bwm_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(bwm_core PUBLIC Qt6::Widgets)
+target_link_libraries(bwm_core PUBLIC Qt6::Widgets Qt6::PrintSupport)
 if(WIN32)
     # AcrylicHelper 调用 DWM API（DwmSetWindowAttribute 等）
     target_link_libraries(bwm_core PUBLIC dwmapi)

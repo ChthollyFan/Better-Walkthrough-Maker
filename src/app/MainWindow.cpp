@@ -592,7 +592,13 @@ void MainWindow::onExportPng()
         return;
     }
     ExportDialog dialog(this, m_pProjectManager, m_pHost, makeContext());
-    dialog.setCurrentPageKey(m_pTreePanel->selectedPageKey());
+    // 根据当前选中对象决定导出模式：文章 → 文章导出，页面 → 页面导出
+    const QString strArticleKey = m_pTreePanel->selectedArticleKey();
+    if(!strArticleKey.isEmpty()) {
+        dialog.setCurrentArticleKey(strArticleKey);
+    } else {
+        dialog.setCurrentPageKey(m_pTreePanel->selectedPageKey());
+    }
     dialog.exec();
 }
 

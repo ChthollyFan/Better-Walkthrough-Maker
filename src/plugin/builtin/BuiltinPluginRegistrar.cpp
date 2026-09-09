@@ -13,6 +13,7 @@
 #include "plugin/PluginHost.h"
 #include "plugin/builtin/BuiltinComponentProviders.h"
 #include "plugin/builtin/BuiltinExportProviders.h"
+#include "plugin/builtin/BuiltinArticleExportProviders.h"
 #include "plugin/builtin/BuiltinTemplateProviders.h"
 #include "plugin/builtin/BuiltinThemeProviders.h"
 #include "ui/AcrylicStyleProvider.h"
@@ -63,8 +64,14 @@ void registerBuiltinPlugins(PluginHost* pHost)
     // ---- 导出格式 Provider ----
     static PngSeparateExportProvider* s_pPngSeparate = new PngSeparateExportProvider;
     static PngLongImageExportProvider* s_pPngLongImage = new PngLongImageExportProvider;
+    static ArticleMarkdownExportProvider* s_pArticleMd = new ArticleMarkdownExportProvider;
+    static ArticlePngExportProvider* s_pArticlePng = new ArticlePngExportProvider;
+    static ArticlePdfExportProvider* s_pArticlePdf = new ArticlePdfExportProvider;
     pHost->registerExportProvider(s_pPngSeparate);
     pHost->registerExportProvider(s_pPngLongImage);
+    pHost->registerExportProvider(s_pArticleMd);
+    pHost->registerExportProvider(s_pArticlePng);
+    pHost->registerExportProvider(s_pArticlePdf);
 
     // ---- 模板 Provider ----
     static BuiltinTemplateProvider* s_pTemplate = new BuiltinTemplateProvider;

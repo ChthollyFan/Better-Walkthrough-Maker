@@ -106,6 +106,7 @@ public slots:
     void onAddWalkthrough();
     void onAddPage();
     void onAddArticle();
+    void onImportArticle();
     void onRenameNode();
     void onDeleteNode();
     // 模板操作

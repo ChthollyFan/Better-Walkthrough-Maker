@@ -11,6 +11,7 @@
 #include "app/panels/ProjectTreePanel.h"
 
 #include "core/Article.h"
+#include "export/ArticleImporter.h"
 #include "project/ProjectManager.h"
 #include "plugin/PluginHost.h"
 #include "plugin/ITemplateProvider.h"
@@ -156,6 +157,7 @@ void ProjectTreePanel::onContextMenu(const QPoint& rPos)
     QAction* pAddWalkthroughAction = nullptr;
     QAction* pAddPageAction = nullptr;
     QAction* pAddArticleAction = nullptr;
+    QAction* pImportArticleAction = nullptr;
     QAction* pRenameAction = nullptr;
     QAction* pDeleteAction = nullptr;
     if(strKey.isEmpty()) {
@@ -169,6 +171,7 @@ void ProjectTreePanel::onContextMenu(const QPoint& rPos)
         // 攻略节点
         pAddPageAction = menu.addAction(QStringLiteral("新建页面…"));
         pAddArticleAction = menu.addAction(QStringLiteral("新建文章…"));
+        pImportArticleAction = menu.addAction(QStringLiteral("从文件导入文章…"));
         menu.addSeparator();
         pRenameAction = menu.addAction(QStringLiteral("重命名攻略…"));
         pDeleteAction = menu.addAction(QStringLiteral("删除攻略…"));
@@ -187,6 +190,8 @@ void ProjectTreePanel::onContextMenu(const QPoint& rPos)
         onAddPage();
     } else if(pChosen == pAddArticleAction) {
         onAddArticle();
+    } else if(pChosen == pImportArticleAction) {
+        onImportArticle();
     } else if(pChosen == pRenameAction) {
         onRenameNode();
     } else if(pChosen == pDeleteAction) {
@@ -370,6 +375,50 @@ void ProjectTreePanel::onAddArticle()
     article.strId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     article.strTitle = strTitle.trimmed();
     article.strMarkdown = QStringLiteral("# %1\n\n").arg(article.strTitle);
+    rWalkthrough.vecArticles.append(article);
+    m_pProjectManager->setDirty();
+    rebuildProjectTree();
+    selectNodeByKey(QStringLiteral("%1:A%2").arg(nWalkthroughIndex)
+                        .arg(rWalkthrough.vecArticles.size() - 1));
+    emit projectStructureChanged();
+}
+
+void ProjectTreePanel::onImportArticle()
+{
+    Project* pProject = m_pProjectManager->project();
+    if(!pProject) {
+        return;
+    }
+
+    // 确定目标攻略
+    const QString strKey = selectedNodeKey();
+    int nWalkthroughIndex = -1;
+    if(strKey.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("导入文章"),
+                                 QStringLiteral("请先选中一个攻略"));
+        return;
+    }
+    const QStringList parts = strKey.split(QLatin1Char(':'));
+    nWalkthroughIndex = parts.at(0).toInt();
+    if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        return;
+    }
+    Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+
+    const QString strFilePath = QFileDialog::getOpenFileName(
+        this, QStringLiteral("导入 Markdown 文件"), QString(),
+        QStringLiteral("Markdown 文件 (*.md *.markdown *.txt)"));
+    if(strFilePath.isEmpty()) {
+        return;
+    }
+
+    QString strError;
+    Article article = ArticleImporter::importFromFile(
+        strFilePath, m_pProjectManager->projectDirectory(), &strError);
+    if(!strError.isEmpty()) {
+        QMessageBox::critical(this, QStringLiteral("导入文章"), strError);
+        return;
+    }
     rWalkthrough.vecArticles.append(article);
     m_pProjectManager->setDirty();
     rebuildProjectTree();
