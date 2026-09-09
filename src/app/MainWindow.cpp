@@ -19,6 +19,7 @@
 #include "app/dialogs/NewProjectDialog.h"
 #include "app/dialogs/SettingsDialog.h"
 #include "app/panels/AssetPanel.h"
+#include "app/panels/ArticleEditor.h"
 #include "app/panels/LayerPanel.h"
 #include "app/panels/ProjectTreePanel.h"
 #include "core/Project.h"
@@ -54,6 +55,7 @@
 #include <QPair>
 #include <QPushButton>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QToolBar>
@@ -158,7 +160,7 @@ void MainWindow::createMenus()
     pAutoSaveAction->setChecked(true);
     connect(pAutoSaveAction, &QAction::toggled, this, &MainWindow::onToggleAutoSave);
 
-    QAction* pExportAction = pFileMenu->addAction(QStringLiteral("导出 PNG(&E)…"));
+    QAction* pExportAction = pFileMenu->addAction(QStringLiteral("导出(&E)…"));
     pExportAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+E")));
     connect(pExportAction, &QAction::triggered, this, &MainWindow::onExportPng);
 
@@ -201,7 +203,8 @@ void MainWindow::createMenus()
             m_pTreePanel, &ProjectTreePanel::onExportTemplate);
 
     // ---- 插入菜单（从 PluginHost 动态构建）----
-    QMenu* pInsertMenu = menuBar()->addMenu(QStringLiteral("插入(&I)"));
+    m_pInsertMenu = menuBar()->addMenu(QStringLiteral("插入(&I)"));
+    QMenu* pInsertMenu = m_pInsertMenu;
     // 遍历所有组件类型 Provider，按 menuPath 构建子菜单
     for(const IComponentProvider* pProvider : m_pHost->componentProviders()) {
         QAction* pAction = pInsertMenu->addAction(pProvider->displayName());
@@ -388,6 +391,25 @@ void MainWindow::createToolBar()
     m_pToolBar->addSeparator();
     QAction* pDeleteAction = m_pToolBar->addAction(QStringLiteral("删除选中"));
     connect(pDeleteAction, &QAction::triggered, this, &MainWindow::onDeleteSelected);
+
+    // 默认隐藏：通过右键"插入"菜单项切换显示（见 createPopupMenu）
+    m_pToolBar->setVisible(false);
+    QAction* pToggleAction = m_pToolBar->toggleViewAction();
+    pToggleAction->setText(QStringLiteral("显示插入工具栏"));
+}
+
+QMenu* MainWindow::createPopupMenu()
+{
+    // 仅在"插入"菜单项上右键时，返回插入工具栏的显示切换菜单；
+    // 菜单栏其他位置右键不弹菜单（避免误触）。
+    const QPoint localPos = menuBar()->mapFromGlobal(QCursor::pos());
+    QAction* pHitAction = menuBar()->actionAt(localPos);
+    if(pHitAction && m_pInsertMenu && pHitAction == m_pInsertMenu->menuAction()) {
+        auto* pMenu = new QMenu(this);
+        pMenu->addAction(m_pToolBar->toggleViewAction());
+        return pMenu;
+    }
+    return nullptr;
 }
 
 void MainWindow::createCentralWidget()
@@ -396,11 +418,44 @@ void MainWindow::createCentralWidget()
     m_pTreePanel = new ProjectTreePanel(this, m_pProjectManager, m_pHost);
     connect(m_pTreePanel, &ProjectTreePanel::pageSelected,
             this, &MainWindow::onPageSelected);
+    connect(m_pTreePanel, &ProjectTreePanel::articleSelected,
+            this, &MainWindow::onArticleSelected);
     connect(m_pTreePanel, &ProjectTreePanel::projectStructureChanged,
             this, &MainWindow::onProjectStructureChanged);
 
     // ---- 画布 ----
     m_pView = new CanvasView(m_pScene, this);
+
+    // ---- 文章编辑器 ----
+    m_pArticleEditor = new ArticleEditor(this, m_pProjectManager);
+    connect(m_pArticleEditor, &ArticleEditor::articleModified,
+            this, [this](const QString& rMarkdown) {
+        // 编辑器内容变化时同步回模型
+        const QString strKey = m_pTreePanel->selectedArticleKey();
+        if(strKey.isEmpty()) {
+            return;
+        }
+        // 文章键格式 "W:A文章索引"
+        const QStringList parts = strKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        const int nArticleIndex = parts.at(1).mid(1).toInt();   // 去掉 "A" 前缀
+        Project* pProject = m_pProjectManager->project();
+        if(pProject && nWalkthroughIndex >= 0
+           && nWalkthroughIndex < pProject->vecWalkthroughs.size()) {
+            Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+            if(nArticleIndex >= 0 && nArticleIndex < rWalkthrough.vecArticles.size()) {
+                rWalkthrough.vecArticles[nArticleIndex].strMarkdown = rMarkdown;
+                m_pProjectManager->setDirty();
+                updateWindowTitle();
+            }
+        }
+    });
+
+    // ---- 中央切换容器：page 0 = 画布，page 1 = 文章编辑器 ----
+    m_pCentralStack = new QStackedWidget(this);
+    m_pCentralStack->addWidget(m_pView);              // index 0：画布
+    m_pCentralStack->addWidget(m_pArticleEditor);     // index 1：文章编辑器
+    m_pCentralStack->setCurrentIndex(0);              // 默认显示画布
 
     // ---- 右侧标签页：素材库 + 图层 ----
     m_pTabPanel = new QTabWidget(this);
@@ -418,10 +473,10 @@ void MainWindow::createCentralWidget()
     m_pTabPanel->addTab(m_pLayerPanel, QStringLiteral("图层"));
     m_pTabPanel->setCurrentIndex(1);   // 默认显示图层
 
-    // ---- 布局：项目树 | 画布 | 标签页 ----
+    // ---- 布局：项目树 | 中央切换容器 | 标签页 ----
     QSplitter* pSplitter = new QSplitter(Qt::Horizontal, this);
     pSplitter->addWidget(m_pTreePanel);
-    pSplitter->addWidget(m_pView);
+    pSplitter->addWidget(m_pCentralStack);
     pSplitter->addWidget(m_pTabPanel);
     pSplitter->setStretchFactor(1, 1);
     pSplitter->setSizes({220, 900, 220});
@@ -557,7 +612,13 @@ void MainWindow::onExportPng()
         return;
     }
     ExportDialog dialog(this, m_pProjectManager, m_pHost, makeContext());
-    dialog.setCurrentPageKey(m_pTreePanel->selectedPageKey());
+    // 根据当前选中对象决定导出模式：文章 → 文章导出，页面 → 页面导出
+    const QString strArticleKey = m_pTreePanel->selectedArticleKey();
+    if(!strArticleKey.isEmpty()) {
+        dialog.setCurrentArticleKey(strArticleKey);
+    } else {
+        dialog.setCurrentPageKey(m_pTreePanel->selectedPageKey());
+    }
     dialog.exec();
 }
 
@@ -590,7 +651,7 @@ void MainWindow::onShowShortcuts()
                                  "新建项目\tCtrl+N\n"
                                  "打开项目\tCtrl+O\n"
                                  "保存\tCtrl+S\n"
-                                 "导出 PNG\tCtrl+E\n"
+                                 "导出\tCtrl+E\n"
                                  "复制当前页到剪贴板\tCtrl+Shift+C\n"
                                  "\n"
                                  "撤销\tCtrl+Z\n"
@@ -658,6 +719,9 @@ void MainWindow::onProjectOpened()
     m_pAssetPanel->refreshAssetList();
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("已打开项目：%1").arg(m_pProjectManager->projectDirectory()), 5000);
+    // 更新文章编辑器的项目上下文（页面引用渲染需要 Project 指针）
+    m_pArticleEditor->setProjectContext(m_pProjectManager->project(),
+                                        ThemeManager::currentTheme().backgroundColor);
     // 自动选中第一个攻略的首页，打开项目即有画面
     const Project* pProject = m_pProjectManager->project();
     if(pProject && !pProject->vecWalkthroughs.isEmpty()
@@ -679,12 +743,28 @@ void MainWindow::onAutoSavePerformed(bool bOk, const QString& strMessage)
 void MainWindow::onPageSelected(const QString& rPageKey)
 {
     (void)rPageKey;
+    // 选中页面节点时切换到画布，并显示右侧面板（素材库/图层）
+    if(!rPageKey.isEmpty()) {
+        m_pCentralStack->setCurrentIndex(0);
+        m_pTabPanel->show();
+    }
     updateCanvasEditor();
+}
+
+void MainWindow::onArticleSelected(const QString& rArticleKey)
+{
+    if(!rArticleKey.isEmpty()) {
+        // 选中文章节点时切换到文章编辑器，隐藏右侧面板（素材库/图层是画布专用）
+        m_pCentralStack->setCurrentIndex(1);
+        m_pTabPanel->hide();
+        updateArticleEditor();
+    }
 }
 
 void MainWindow::onProjectStructureChanged()
 {
     updateCanvasEditor();
+    updateArticleEditor();
     updateWindowTitle();
 }
 
@@ -705,6 +785,31 @@ void MainWindow::updateCanvasEditor()
     m_pView->fitInView(m_pScene->sceneRect(), Qt::KeepAspectRatio);
     m_pView->centerOn(m_pScene->sceneRect().center());
     m_pLayerPanel->refreshLayerList();
+}
+
+void MainWindow::updateArticleEditor()
+{
+    const QString strKey = m_pTreePanel->selectedArticleKey();
+    if(strKey.isEmpty()) {
+        m_pArticleEditor->clear();
+        return;
+    }
+    // 文章键格式 "W:A文章索引"
+    const QStringList parts = strKey.split(QLatin1Char(':'));
+    const int nWalkthroughIndex = parts.at(0).toInt();
+    const int nArticleIndex = parts.at(1).mid(1).toInt();
+    const Project* pProject = m_pProjectManager->project();
+    if(!pProject || nWalkthroughIndex < 0
+       || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        m_pArticleEditor->clear();
+        return;
+    }
+    const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+    if(nArticleIndex < 0 || nArticleIndex >= rWalkthrough.vecArticles.size()) {
+        m_pArticleEditor->clear();
+        return;
+    }
+    m_pArticleEditor->loadArticle(rWalkthrough.vecArticles.at(nArticleIndex));
 }
 
 void MainWindow::syncCanvasToModel()
@@ -740,6 +845,9 @@ void MainWindow::applyTheme()
     m_pScene->setPageBackgroundColor(theme.backgroundColor);
     m_pView->viewport()->update();
     updateCanvasEditor();
+    // 同步文章编辑器的背景色（页面引用渲染用）
+    m_pArticleEditor->setProjectContext(m_pProjectManager->project(),
+                                        theme.backgroundColor);
 }
 
 void MainWindow::applyUiStyle()

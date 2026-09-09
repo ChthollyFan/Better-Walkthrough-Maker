@@ -27,6 +27,10 @@ public:
                                   const QString& rAuthor = QString());
     // 写 PNG 文件；失败时返回 false 并给出原因
     static bool writePng(const QImage& rImage, const QString& strFilePath, QString* pErrorMessage);
+
+    // 在图片右下角绘制作者署名（半透明）；rAuthor 为空时不绘制。
+    // 供文章导出等自定义渲染流程复用。
+    static void drawAuthorMark(QImage& rImage, const QString& rAuthor, qreal dScale = 1.0);
 };
 
 } // namespace bwm

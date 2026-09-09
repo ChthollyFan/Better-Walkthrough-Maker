@@ -8,8 +8,9 @@
  *
  * 节点键格式：
  * - ""         → 项目根节点
- * - "W"        → 攻略节点（W 为攻略索引）
+ * - "W"        → 图文攻略节点（W 为攻略索引）
  * - "W:P"      → 页面节点（W 为攻略索引，P 为页面索引）
+ * - "A"        → 文章攻略节点（A 为文章索引，前缀 A 区分于图文攻略）
  */
 #ifndef BWM_APP_PANELS_PROJECTTREEPANEL_H
 #define BWM_APP_PANELS_PROJECTTREEPANEL_H
@@ -58,6 +59,11 @@ public:
     QString selectedPageKey() const;
 
     /**
+     * @brief 获取当前选中文章节点的键（"A" 格式），非文章节点返回空。
+     */
+    QString selectedArticleKey() const;
+
+    /**
      * @brief 获取当前选中节点的键（""/"W"/"W:P"）。
      */
     QString selectedNodeKey() const;
@@ -73,6 +79,12 @@ signals:
      * @param rPageKey  页面键（"W:P"），空表示未选中页面。
      */
     void pageSelected(const QString& rPageKey);
+
+    /**
+     * @brief 选中了文章节点（或切换到非文章节点）。
+     * @param rArticleKey  文章键（"A"），空表示未选中文章。
+     */
+    void articleSelected(const QString& rArticleKey);
 
     /**
      * @brief 项目结构变更（增删攻略/页面/重命名）。
@@ -93,6 +105,8 @@ public slots:
     // 攻略/页面管理
     void onAddWalkthrough();
     void onAddPage();
+    void onAddArticle();
+    void onImportArticle();
     void onRenameNode();
     void onDeleteNode();
     // 模板操作

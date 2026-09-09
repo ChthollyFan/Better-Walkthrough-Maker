@@ -47,9 +47,16 @@ public:
                  const PluginContext& rContext);
 
     /**
-     * @brief 设置当前选中页面键（"W:P" 格式），用于"当前页"范围导出。
+     * @brief 设置当前选中页面键（"W:P" 格式），用于页面型导出。
+     *        当此键非空且文章键为空时，对话框显示页面导出选项。
      */
     void setCurrentPageKey(const QString& rKey);
+
+    /**
+     * @brief 设置当前选中文章键（"W:A文章索引" 格式），用于文章型导出。
+     *        当此键非空时，对话框显示文章导出选项（Markdown / PNG / PDF）。
+     */
+    void setCurrentArticleKey(const QString& rKey);
 
 private slots:
     void onAccept();
@@ -61,6 +68,7 @@ private:
     PluginHost* m_pHost;                 ///< 插件宿主
     PluginContext m_context;             ///< 插件上下文
     QString m_strCurrentPageKey;         ///< 当前选中页面键
+    QString m_strCurrentArticleKey;      ///< 当前选中文章键
 };
 
 } // namespace bwm

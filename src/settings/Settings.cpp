@@ -103,4 +103,16 @@ void Settings::setWindowGeometry(const QByteArray& rGeometry)
     }
 }
 
+QString Settings::lastExportDirectory()
+{
+    return settings().value(QStringLiteral("lastExportDirectory")).toString();
+}
+
+void Settings::setLastExportDirectory(const QString& strDir)
+{
+    if (!strDir.trimmed().isEmpty()) {
+        settings().setValue(QStringLiteral("lastExportDirectory"), strDir);
+    }
+}
+
 } // namespace bwm

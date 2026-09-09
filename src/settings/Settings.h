@@ -46,6 +46,10 @@ public:
     static QByteArray windowGeometry();
     static void setWindowGeometry(const QByteArray& rGeometry);
 
+    // 上次导出目录（导出对话框默认填充，导出成功后更新）
+    static QString lastExportDirectory();
+    static void setLastExportDirectory(const QString& strDir);
+
 private:
     static QSettings& settings();
 };

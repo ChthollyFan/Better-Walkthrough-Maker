@@ -10,6 +10,8 @@
  */
 #include "app/panels/ProjectTreePanel.h"
 
+#include "core/Article.h"
+#include "export/ArticleImporter.h"
 #include "project/ProjectManager.h"
 #include "plugin/PluginHost.h"
 #include "plugin/ITemplateProvider.h"
@@ -82,7 +84,16 @@ void ProjectTreePanel::rebuildProjectTree()
             pPageItem->setText(0, rWalkthrough.vecPages.at(nPage).strName);
             m_mapNodeKeys.insert(pPageItem, QStringLiteral("%1:%2").arg(nWalkthrough).arg(nPage));
         }
+
+        // 文章节点：与页面同级，放在攻略下，键格式 "W:A"
+        for(int nArticle = 0; nArticle < rWalkthrough.vecArticles.size(); ++nArticle) {
+            const Article& rArticle = rWalkthrough.vecArticles.at(nArticle);
+            auto* pArticleItem = new QTreeWidgetItem(pWalkthroughItem);
+            pArticleItem->setText(0, QStringLiteral("%1（文章）").arg(rArticle.strTitle));
+            m_mapNodeKeys.insert(pArticleItem, QStringLiteral("%1:A%2").arg(nWalkthrough).arg(nArticle));
+        }
     }
+
     m_pTree->expandAll();
 }
 
@@ -95,6 +106,17 @@ QString ProjectTreePanel::selectedPageKey() const
     const QString strKey = m_mapNodeKeys.value(selected.first());
     // 仅页面节点（含冒号）才驱动画布
     return strKey.contains(QLatin1Char(':')) ? strKey : QString();
+}
+
+QString ProjectTreePanel::selectedArticleKey() const
+{
+    const QList<QTreeWidgetItem*> selected = m_pTree->selectedItems();
+    if(selected.isEmpty()) {
+        return QString();
+    }
+    const QString strKey = m_mapNodeKeys.value(selected.first());
+    // 文章节点键含 ":A"（如 "0:A0" 表示第 0 个攻略的第 0 个文章）
+    return strKey.contains(QStringLiteral(":A")) ? strKey : QString();
 }
 
 QString ProjectTreePanel::selectedNodeKey() const
@@ -119,6 +141,7 @@ void ProjectTreePanel::selectNodeByKey(const QString& rKey)
 void ProjectTreePanel::onSelectionChanged()
 {
     emit pageSelected(selectedPageKey());
+    emit articleSelected(selectedArticleKey());
 }
 
 void ProjectTreePanel::onContextMenu(const QPoint& rPos)
@@ -133,14 +156,22 @@ void ProjectTreePanel::onContextMenu(const QPoint& rPos)
     QMenu menu(this);
     QAction* pAddWalkthroughAction = nullptr;
     QAction* pAddPageAction = nullptr;
+    QAction* pAddArticleAction = nullptr;
+    QAction* pImportArticleAction = nullptr;
     QAction* pRenameAction = nullptr;
     QAction* pDeleteAction = nullptr;
     if(strKey.isEmpty()) {
         // 项目节点
         pAddWalkthroughAction = menu.addAction(QStringLiteral("新建攻略…"));
+    } else if(strKey.contains(QStringLiteral(":A"))) {
+        // 文章节点
+        pRenameAction = menu.addAction(QStringLiteral("重命名文章…"));
+        pDeleteAction = menu.addAction(QStringLiteral("删除文章…"));
     } else if(!strKey.contains(QLatin1Char(':'))) {
         // 攻略节点
         pAddPageAction = menu.addAction(QStringLiteral("新建页面…"));
+        pAddArticleAction = menu.addAction(QStringLiteral("新建文章…"));
+        pImportArticleAction = menu.addAction(QStringLiteral("从文件导入文章…"));
         menu.addSeparator();
         pRenameAction = menu.addAction(QStringLiteral("重命名攻略…"));
         pDeleteAction = menu.addAction(QStringLiteral("删除攻略…"));
@@ -157,6 +188,10 @@ void ProjectTreePanel::onContextMenu(const QPoint& rPos)
         onAddWalkthrough();
     } else if(pChosen == pAddPageAction) {
         onAddPage();
+    } else if(pChosen == pAddArticleAction) {
+        onAddArticle();
+    } else if(pChosen == pImportArticleAction) {
+        onImportArticle();
     } else if(pChosen == pRenameAction) {
         onRenameNode();
     } else if(pChosen == pDeleteAction) {
@@ -306,6 +341,92 @@ void ProjectTreePanel::onAddPage()
     emit projectStructureChanged();
 }
 
+void ProjectTreePanel::onAddArticle()
+{
+    Project* pProject = m_pProjectManager->project();
+    if(!pProject) {
+        return;
+    }
+
+    // 确定目标攻略：选中攻略节点或其子节点（页面/文章）
+    const QString strKey = selectedNodeKey();
+    int nWalkthroughIndex = -1;
+    if(strKey.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("新建文章"),
+                                 QStringLiteral("请先选中一个攻略"));
+        return;
+    }
+    const QStringList parts = strKey.split(QLatin1Char(':'));
+    nWalkthroughIndex = parts.at(0).toInt();
+    if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        return;
+    }
+    Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+
+    bool bOk = false;
+    const QString strTitle = QInputDialog::getText(
+        this, QStringLiteral("新建文章"), QStringLiteral("文章标题："),
+        QLineEdit::Normal, QStringLiteral("文章 %1").arg(rWalkthrough.vecArticles.size() + 1), &bOk);
+    if(!bOk || strTitle.trimmed().isEmpty()) {
+        return;
+    }
+
+    Article article;
+    article.strId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    article.strTitle = strTitle.trimmed();
+    article.strMarkdown = QStringLiteral("# %1\n\n").arg(article.strTitle);
+    rWalkthrough.vecArticles.append(article);
+    m_pProjectManager->setDirty();
+    rebuildProjectTree();
+    selectNodeByKey(QStringLiteral("%1:A%2").arg(nWalkthroughIndex)
+                        .arg(rWalkthrough.vecArticles.size() - 1));
+    emit projectStructureChanged();
+}
+
+void ProjectTreePanel::onImportArticle()
+{
+    Project* pProject = m_pProjectManager->project();
+    if(!pProject) {
+        return;
+    }
+
+    // 确定目标攻略
+    const QString strKey = selectedNodeKey();
+    int nWalkthroughIndex = -1;
+    if(strKey.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("导入文章"),
+                                 QStringLiteral("请先选中一个攻略"));
+        return;
+    }
+    const QStringList parts = strKey.split(QLatin1Char(':'));
+    nWalkthroughIndex = parts.at(0).toInt();
+    if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        return;
+    }
+    Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+
+    const QString strFilePath = QFileDialog::getOpenFileName(
+        this, QStringLiteral("导入 Markdown 文件"), QString(),
+        QStringLiteral("Markdown 文件 (*.md *.markdown *.txt)"));
+    if(strFilePath.isEmpty()) {
+        return;
+    }
+
+    QString strError;
+    Article article = ArticleImporter::importFromFile(
+        strFilePath, m_pProjectManager->projectDirectory(), &strError);
+    if(!strError.isEmpty()) {
+        QMessageBox::critical(this, QStringLiteral("导入文章"), strError);
+        return;
+    }
+    rWalkthrough.vecArticles.append(article);
+    m_pProjectManager->setDirty();
+    rebuildProjectTree();
+    selectNodeByKey(QStringLiteral("%1:A%2").arg(nWalkthroughIndex)
+                        .arg(rWalkthrough.vecArticles.size() - 1));
+    emit projectStructureChanged();
+}
+
 void ProjectTreePanel::onRenameNode()
 {
     Project* pProject = m_pProjectManager->project();
@@ -316,6 +437,19 @@ void ProjectTreePanel::onRenameNode()
     QString strOldName;
     if(strKey.isEmpty()) {
         strOldName = pProject->strName;
+    } else if(strKey.contains(QStringLiteral(":A"))) {
+        // 文章节点（键格式 "W:A文章索引"）
+        const QStringList parts = strKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+            return;
+        }
+        const int nArticleIndex = parts.at(1).mid(1).toInt();   // 去掉 "A" 前缀
+        const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+        if(nArticleIndex < 0 || nArticleIndex >= rWalkthrough.vecArticles.size()) {
+            return;
+        }
+        strOldName = rWalkthrough.vecArticles.at(nArticleIndex).strTitle;
     } else {
         const QStringList parts = strKey.split(QLatin1Char(':'));
         const int nWalkthroughIndex = parts.at(0).toInt();
@@ -342,6 +476,16 @@ void ProjectTreePanel::onRenameNode()
     }
     if(strKey.isEmpty()) {
         pProject->strName = strNewName.trimmed();
+    } else if(strKey.contains(QStringLiteral(":A"))) {
+        const QStringList parts = strKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        const int nArticleIndex = parts.at(1).mid(1).toInt();
+        if(nWalkthroughIndex >= 0 && nWalkthroughIndex < pProject->vecWalkthroughs.size()) {
+            Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+            if(nArticleIndex >= 0 && nArticleIndex < rWalkthrough.vecArticles.size()) {
+                rWalkthrough.vecArticles[nArticleIndex].strTitle = strNewName.trimmed();
+            }
+        }
     } else {
         const QStringList parts = strKey.split(QLatin1Char(':'));
         const int nWalkthroughIndex = parts.at(0).toInt();
@@ -369,6 +513,32 @@ void ProjectTreePanel::onDeleteNode()
         QMessageBox::information(this, QStringLiteral("删除"), QStringLiteral("项目节点不可删除"));
         return;
     }
+
+    // 文章节点单独处理（键含 ":A"）
+    if(strKey.contains(QStringLiteral(":A"))) {
+        const QStringList parts = strKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+            return;
+        }
+        Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+        const int nArticleIndex = parts.at(1).mid(1).toInt();
+        if(nArticleIndex < 0 || nArticleIndex >= rWalkthrough.vecArticles.size()) {
+            return;
+        }
+        const QString strConfirm = QStringLiteral("确定删除文章「%1」？")
+                                       .arg(rWalkthrough.vecArticles.at(nArticleIndex).strTitle);
+        if(QMessageBox::question(this, QStringLiteral("删除"), strConfirm,
+                                 QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+            return;
+        }
+        rWalkthrough.vecArticles.removeAt(nArticleIndex);
+        m_pProjectManager->setDirty();
+        rebuildProjectTree();
+        emit projectStructureChanged();
+        return;
+    }
+
     const QStringList parts = strKey.split(QLatin1Char(':'));
     const int nWalkthroughIndex = parts.at(0).toInt();
     if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {

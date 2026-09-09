@@ -8,6 +8,8 @@
  */
 #include "app/dialogs/ExportDialog.h"
 
+#include "core/Article.h"
+#include "core/Project.h"
 #include "plugin/PluginHost.h"
 #include "plugin/IExportProvider.h"
 #include "project/ProjectManager.h"
@@ -42,6 +44,8 @@ public:
     QComboBox* pScaleCombo = nullptr;             ///< 分辨率倍率下拉框
     QCheckBox* pAuthorCheck = nullptr;            ///< 添加作者署名
     QLineEdit* pDirEdit = nullptr;                ///< 导出目录输入框
+    QGroupBox* pTargetGroup = nullptr;            ///< 导出范围分组（文章模式下隐藏）
+    QGroupBox* pScaleGroup = nullptr;             ///< 倍率分组（文章模式下隐藏，复用 pAuthorCheck 所在行）
 };
 
 ExportDialog::ExportDialog(QWidget* pParent, ProjectManager* pProjectManager,
@@ -56,7 +60,8 @@ ExportDialog::ExportDialog(QWidget* pParent, ProjectManager* pProjectManager,
     auto* pFormLayout = new QFormLayout(this);
 
     // ---- 导出范围 ----
-    auto* pTargetGroup = new QGroupBox(QStringLiteral("导出范围"), this);
+    m_pUi->pTargetGroup = new QGroupBox(QStringLiteral("导出范围"), this);
+    auto* pTargetGroup = m_pUi->pTargetGroup;
     auto* pTargetLayout = new QVBoxLayout(pTargetGroup);
     m_pUi->pRadioCurrentPage = new QRadioButton(QStringLiteral("当前页"), pTargetGroup);
     m_pUi->pRadioWalkthrough = new QRadioButton(QStringLiteral("当前攻略全部页"), pTargetGroup);
@@ -100,9 +105,13 @@ ExportDialog::ExportDialog(QWidget* pParent, ProjectManager* pProjectManager,
     }
     pFormLayout->addRow(m_pUi->pAuthorCheck);
 
-    // ---- 导出目录 ----
+    // ---- 导出目录（默认填充上次导出目录）----
     m_pUi->pDirEdit = new QLineEdit(this);
     m_pUi->pDirEdit->setPlaceholderText(QStringLiteral("选择导出目录…"));
+    const QString strLastDir = Settings::lastExportDirectory();
+    if(!strLastDir.isEmpty()) {
+        m_pUi->pDirEdit->setText(strLastDir);
+    }
     auto* pBrowseButton = new QPushButton(QStringLiteral("浏览…"), this);
     connect(pBrowseButton, &QPushButton::clicked, this, [this]() {
         const QString strDir = QFileDialog::getExistingDirectory(
@@ -136,6 +145,28 @@ void ExportDialog::setCurrentPageKey(const QString& rKey)
     m_strCurrentPageKey = rKey;
 }
 
+void ExportDialog::setCurrentArticleKey(const QString& rKey)
+{
+    m_strCurrentArticleKey = rKey;
+    if(rKey.isEmpty()) {
+        return;
+    }
+    // 文章模式：清空格式下拉框，只填入支持文章导出的 Provider
+    m_pUi->pFormatCombo->clear();
+    for(const IExportProvider* pProvider : m_pHost->exportProviders()) {
+        if(pProvider->supportsArticle()) {
+            m_pUi->pFormatCombo->addItem(pProvider->displayName(),
+                                         QVariant::fromValue(const_cast<IExportProvider*>(pProvider)));
+        }
+    }
+    m_pUi->pFormatCombo->setEnabled(true);
+    // 隐藏页面型选项（导出范围、倍率）
+    m_pUi->pTargetGroup->hide();
+    m_pUi->pScaleCombo->hide();
+    // 标题提示为文章导出
+    setWindowTitle(QStringLiteral("导出文章"));
+}
+
 void ExportDialog::onAccept()
 {
     if(!m_pProjectManager->hasProject()) {
@@ -149,7 +180,45 @@ void ExportDialog::onAccept()
         return;
     }
 
-    // 收集导出页面与攻略标题
+    // 获取选中的导出 Provider
+    auto* pProvider = m_pUi->pFormatCombo->currentData().value<IExportProvider*>();
+    if(!pProvider) {
+        QMessageBox::critical(this, QStringLiteral("导出"), QStringLiteral("未选择有效的导出格式"));
+        return;
+    }
+
+    const QString strAuthor = m_pUi->pAuthorCheck->isChecked()
+        ? Settings::authorName() : QString();
+
+    // ---- 文章导出路径 ----
+    if(!m_strCurrentArticleKey.isEmpty()) {
+        Project* pProject = m_pProjectManager->project();
+        // 文章键格式 "W:A文章索引"
+        const QStringList parts = m_strCurrentArticleKey.split(QLatin1Char(':'));
+        const int nWalkthroughIndex = parts.at(0).toInt();
+        if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+            QMessageBox::warning(this, QStringLiteral("导出"), QStringLiteral("无效的文章引用"));
+            return;
+        }
+        const Walkthrough& rWalkthrough = pProject->vecWalkthroughs.at(nWalkthroughIndex);
+        const int nArticleIndex = parts.at(1).mid(1).toInt();
+        if(nArticleIndex < 0 || nArticleIndex >= rWalkthrough.vecArticles.size()) {
+            QMessageBox::warning(this, QStringLiteral("导出"), QStringLiteral("无效的文章引用"));
+            return;
+        }
+        const Article& rArticle = rWalkthrough.vecArticles.at(nArticleIndex);
+        const int nExported = pProvider->exportArticle(
+            rArticle, *pProject, rArticle.strTitle, strExportDir, strAuthor, m_context, this);
+        if(nExported > 0) {
+            Settings::setLastExportDirectory(strExportDir);
+            accept();
+        } else {
+            QMessageBox::warning(this, QStringLiteral("导出"), QStringLiteral("导出失败，请检查目录权限"));
+        }
+        return;
+    }
+
+    // ---- 页面导出路径（原有逻辑）----
     Project* pProject = m_pProjectManager->project();
     QVector<Page> vecPages;
     QString strWalkthroughTitle;
@@ -197,22 +266,13 @@ void ExportDialog::onAccept()
         return;
     }
 
-    // 获取选中的导出 Provider
-    auto* pProvider = m_pUi->pFormatCombo->currentData().value<IExportProvider*>();
-    if(!pProvider) {
-        QMessageBox::critical(this, QStringLiteral("导出"), QStringLiteral("未选择有效的导出格式"));
-        return;
-    }
-
+    // 执行导出（pProvider / strAuthor 已在函数开头获取）
     const qreal dScale = m_pUi->pScaleCombo->currentData().toDouble();
-    const QString strAuthor = m_pUi->pAuthorCheck->isChecked()
-        ? Settings::authorName() : QString();
-
-    // 执行导出
     const int nExported = pProvider->exportPages(
         vecPages, strWalkthroughTitle, strExportDir, dScale, strAuthor, m_context, this);
 
     if(nExported > 0) {
+        Settings::setLastExportDirectory(strExportDir);
         accept();   // 关闭对话框
     } else {
         QMessageBox::warning(this, QStringLiteral("导出"), QStringLiteral("导出失败，请检查目录权限"));

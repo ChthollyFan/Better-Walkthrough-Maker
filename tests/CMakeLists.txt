@@ -4,6 +4,8 @@ find_package(Qt6 REQUIRED COMPONENTS Test)
 set(TEST_SOURCES
   core/test_project_serialization.cpp
   core/test_project_manager.cpp
+  core/test_article.cpp
+  export/test_article_export.cpp
   export/test_export_renderer.cpp
   template/test_template.cpp
 )

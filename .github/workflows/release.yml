@@ -1,7 +1,9 @@
-# 自动发布：推送 v* 标签时构建并发布绿色版 zip 到 GitHub Releases
-# 用法：git tag v0.1.0 && git push origin v0.1.0
+# 自动发布：推送 v* 标签时构建并发布单文件 BWM.exe 到 GitHub Releases
+# 用法：git tag v0.3.0 && git push origin v0.3.0
 # 说明：此工作流在 Windows 官方 runner 上安装 MinGW 与 Qt（MinGW 版），
 #       与本地构建环境保持一致，避免 MSVC 差异。
+#       发布产物为单文件 BWM.exe（Enigma Virtual Box 打包，无需 Qt DLL），
+#       打包工具 enigmavbconsole.exe 已随仓库提供（tools/ 目录）。
 name: Build and Release
 
 on:
@@ -87,22 +89,23 @@ jobs:
           $windeployqt = Join-Path $env:Qt6_DIR 'bin/windeployqt.exe'
           & $windeployqt --release --compiler-runtime build/src/bwm.exe
 
-      - name: Package zip
+      - name: Package single exe (Enigma Virtual Box)
         shell: pwsh
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          $distDir = "dist/BetterWalkthroughMaker-$tag-win64"
-          New-Item -ItemType Directory -Force -Path $distDir | Out-Null
-          Copy-Item build/src/* $distDir -Recurse -Force
-          Copy-Item README.md $distDir -Force
-          Compress-Archive -Path $distDir -DestinationPath "dist/BetterWalkthroughMaker-$tag-win64.zip" -Force
+          # 第一步：部署 Qt 运行时到 release/ 目录（exe + DLL + 插件）
+          pwsh -File package.ps1
+          # 第二步：用仓库内 tools/enigmavbconsole.exe 打包成单文件 BWM.exe
+          pwsh -File package_single.ps1
+          if (-not (Test-Path 'BWM.exe')) { Write-Error 'BWM.exe 未生成'; exit 1 }
+          Write-Host "单文件大小: $([math]::Round((Get-Item 'BWM.exe').Length/1MB,1)) MB"
 
       - name: Create Release
         # 仅打 tag（v*）时创建 GitHub Release；手动触发时跳过
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          # 只发布单文件可执行程序（免安装、无需 Qt DLL）
+          files: BWM.exe
           generate_release_notes: true
 
       - name: Upload artifact (manual runs)
@@ -110,5 +113,5 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: bwm-windows-portable
-          path: dist/*.zip
+          name: BWM-windows-single
+          path: BWM.exe

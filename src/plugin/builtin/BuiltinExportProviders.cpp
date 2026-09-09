@@ -9,15 +9,13 @@
 #include "plugin/builtin/BuiltinExportProviders.h"
 
 #include "export/ExportRenderer.h"
+#include "export/ExportResultHelper.h"
 
-#include <QDesktopServices>
 #include <QDir>
 #include <QImage>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QProgressDialog>
 #include <QRegularExpression>
-#include <QUrl>
 
 namespace bwm {
 
@@ -37,26 +35,6 @@ QString sanitizeFileName(const QString& rTitle)
         strSafe = QStringLiteral("攻略");
     }
     return strSafe;
-}
-
-/**
- * @brief 显示导出完成提示，支持一键打开导出目录。
- * @param pParent     父窗口
- * @param nCount      导出文件数
- * @param strDirPath  导出目录路径
- */
-void showExportResult(QWidget* pParent, int nCount, const QString& strDirPath)
-{
-    QMessageBox box(pParent);
-    box.setWindowTitle(QStringLiteral("导出完成"));
-    box.setIcon(QMessageBox::Information);
-    box.setText(QStringLiteral("已成功导出 %1 张图片到：\n%2").arg(nCount).arg(strDirPath));
-    QPushButton* pOpenButton = box.addButton(QStringLiteral("打开目录"), QMessageBox::AcceptRole);
-    box.addButton(QMessageBox::Close);
-    box.exec();
-    if(box.clickedButton() == pOpenButton) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(strDirPath));
-    }
 }
 
 } // namespace
@@ -108,7 +86,7 @@ int PngSeparateExportProvider::exportPages(const QVector<Page>& vecPages,
     progress.setValue(vecPages.size());
 
     if(nExported > 0) {
-        showExportResult(pParent, nExported, strCleanDir);
+        showExportResult(pParent, nExported, strCleanDir, QStringLiteral("张图片"));
     }
     return nExported;
 }
@@ -161,7 +139,7 @@ int PngLongImageExportProvider::exportPages(const QVector<Page>& vecPages,
         return 0;
     }
     progress.setValue(1);
-    showExportResult(pParent, 1, strCleanDir);
+    showExportResult(pParent, 1, strCleanDir, QStringLiteral("张长图"));
     return 1;
 }
 

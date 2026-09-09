@@ -9,6 +9,7 @@
 - 任何 **git 提交（commit）** 之前，必须先向用户列出提交方案（涉及文件、提交信息），并使用 `ask_user_question` 询问是否提交，获得用户明确确认后方可执行。
 - 任何 **发布操作（打 tag / 推送 tag / 创建 Release）** 之前，同样必须先列出方案并使用 `ask_user_question` 询问用户是否执行，确认后方可执行。
 - 此规则对普通提交与文档改动一视同仁，用户未确认前不得执行 git 写操作。
+- 每次修改后除更改一些变量等简单修改外，重要或者大型修改都需要加入注释说明；
 
 ## 编码规范
 
@@ -79,7 +80,14 @@ build\src\bwm.exe
 
 # 部署 Qt 运行时 DLL 到 exe 同目录（首次编译或清除 build 后需执行一次）
 C:\Users\ThinkPad\Qt\6.11.2\mingw_64\bin\windeployqt.exe --release --compiler-runtime build\src\bwm.exe
+
+# 打包（发布用）
+pwsh -File package.ps1          # 生成 release/ 目录（exe + Qt DLL + 插件）
+pwsh -File package_single.ps1   # 生成 BWM.exe（单文件，免安装、无需 Qt DLL）
 ```
+
+> **发布产物只有一个**：单文件 `BWM.exe`（由 `package_single.ps1` 用 Enigma Virtual Box 打包，
+> 打包工具 `enigmavbconsole.exe` 已随仓库提供在 `tools/` 目录，无需额外安装）。
 
 > **注意**：`windeployqt` 会把 Qt6Core/Qt6Widgets/Qt6Gui 等运行时 DLL 及平台插件（`platforms\qwindows.dll`）复制到 `build\src\` 下。清除 `build` 目录重新配置后这些 DLL 会丢失，需重新执行上述部署命令。仅设置 `PATH` 指向 Qt 的 `bin` 目录也可以运行，但双击 exe 时找不到 DLL，推荐用 `windeployqt` 做自包含部署。
 
@@ -119,7 +127,10 @@ C:\Users\ThinkPad\Qt\6.11.2\mingw_64\bin\windeployqt.exe --release --compiler-ru
 ## Tag 发布流程
 
 > 说明：本流程**仅在用户明确提出发布要求时执行**，日常开发中不执行。
-> 本项目适配：第五步打 tag 并推送后，GitHub Actions（`.github/workflows/release.yml`）会自动完成构建、测试、打包并发布到 GitHub Releases，故第六节"部署"中的手动服务器部署对本项目不适用（无服务器，改为验证 Release 产物）。
+> 本项目适配：第五步打 tag 并推送后，GitHub Actions（`.github/workflows/release.yml`）会自动完成
+> 构建 → 测试 → 部署 Qt 运行时 → 用 Enigma Virtual Box 打包，并发布到 GitHub Releases。
+> **发布产物只有一个：单文件 `BWM.exe`**（免安装、无需 Qt DLL）。
+> 故第六节"部署"中的手动服务器部署对本项目不适用（无服务器，改为验证 Release 产物）。
 
 ---
 
@@ -268,7 +279,13 @@ C:\Users\ThinkPad\Qt\6.11.2\mingw_64\bin\windeployqt.exe --release --compiler-ru
 3. 执行线上冒烟测试（核心功能验证）。
 4. 测试通过则继续；不通过则执行回滚（步骤八）。
 
-> 本项目适配：GitHub Actions 自动构建并发布 Release，本步改为验证 Release 产物的构建与下载可用性。
+> 本项目适配：GitHub Actions 自动构建并发布 Release，**本步改为验证单文件 `BWM.exe`**：
+>
+> 1. 在 Actions 页面确认工作流成功（编译、测试、打包全绿）。
+> 2. 从 Release 页面下载 `BWM.exe`。
+> 3. **复制到空目录**（确保目录内无 Qt DLL）后双击运行，确认能正常启动。
+> 4. 冒烟测试核心功能：新建项目 → 插入组件 → 导出 PNG；新建文章 → 编辑 → 导出。
+> 5. 本地预验证（可选）：`pwsh -File package_single.ps1` 生成 `BWM.exe` 后同样做空目录测试。
 
 ---
 
@@ -321,4 +338,5 @@ C:\Users\ThinkPad\Qt\6.11.2\mingw_64\bin\windeployqt.exe --release --compiler-ru
 - [ ] Tag 正文内容与 CHANGELOG.md 对应条目一致
 - [ ] main 分支已包含所有待发布代码
 - [ ] 远程推送成功（`git push --tags`）
+- [ ] 单文件 `BWM.exe` 已在空目录验证可独立运行（无 Qt DLL 依赖）
 

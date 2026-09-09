@@ -6,6 +6,7 @@
 #ifndef BWM_CORE_PROJECT_H
 #define BWM_CORE_PROJECT_H
 
+#include "core/Article.h"
 #include "core/Component.h"
 
 #include <QSize>
@@ -37,17 +38,21 @@ struct Page {
 };
 
 // 攻略：项目下的一个攻略，绑定一个类型（对应模板分类）。
+// 一个攻略下可同时包含页面（图文）和文章（Markdown），两者是同级兄弟。
 struct Walkthrough {
     QString strTitle;                     // 攻略标题
     E_WALKTHROUGH_TYPE eType = E_WALKTHROUGH_TYPE_COVER;
-    QVector<Page> vecPages;               // 页面列表
+    QVector<Page> vecPages;               // 页面列表（图文页面）
+    QVector<Article> vecArticles;         // 文章列表（Markdown 文章，与页面同级）
 };
 
 // 项目：对应一个游戏，磁盘上是一个自包含的 .bwm 文件夹。
 struct Project {
     QString strName;                      // 游戏名
     QString strFilePath;                  // project.json 的绝对路径
-    QVector<Walkthrough> vecWalkthroughs; // 攻略列表
+    QVector<Walkthrough> vecWalkthroughs; // 攻略列表（每个攻略可含页面与文章）
+    QVector<Article> vecArticles;         // 已废弃：旧版本的 project 级文章列表，
+                                          // 反序列化时迁移到攻略内，新代码不应使用
     // 预留：素材库（M3）、模板引用（M5）、主题引用（M5）
 };
 
