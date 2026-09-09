@@ -1,208 +1,271 @@
-# 文章攻略（Markdown）模块设计方案
+# 文章攻略（Markdown）模块设计
 
-> 状态：设计已确认，待分期实施
-> 日期：2025-01
+> 状态：✅ 已实现（四期全部完成）
+> 日期：2025-01 设计定稿 / 实施完成
+> 相关提交：`a9c9c8d`（数据层）、`7189c95`（编辑器）、`ad574f4`（攻略内嵌重构）、`27882f5`（页面引用渲染）、`6679194`（导入导出）
 
 ## 一、产品定位
 
-在现有"图文攻略（Walkthrough，画布 + 组件 → PNG）"之外，新增平级的**文章攻略（Article）**：基于 Markdown 的富文本攻略，支持嵌入图片、引用项目内图文攻略页面，可编辑 / 预览 / 导入 / 导出。
+在"图文攻略（画布 + 组件 → PNG）"之外，新增基于 Markdown 的**文章攻略**，支持嵌入图片、引用项目内图文攻略页面，可编辑 / 预览 / 导入 / 导出。
 
-用户右键项目树时可选择"新建页面"（图文）或"新建文章"（Markdown）。
+**关键设计决定**：文章不是与图文攻略平级的独立概念，而是**攻略（Walkthrough）的子级**——一个攻略下可同时包含页面（图文）和文章（Markdown），两者是同级兄弟。
 
-## 二、技术前提（已验证）
+用户右键项目树中的**攻略节点**即可选择"新建页面"或"新建文章"。
 
-| 能力 | Qt 提供 | 是否需新增依赖 |
+## 二、技术前提
+
+| 能力 | Qt 提供 | 依赖 |
 |---|---|---|
-| Markdown 渲染 | `QTextDocument::setMarkdown()`，支持 CommonMark + GFM | 否，Widgets 自带 |
-| 图片嵌入 | 重写 `QTextDocument::loadResource()` 注入项目内图片 | 否 |
-| PDF 导出 | `QPrinter(PdfFormat)` + `QTextDocument::print()` 多页分页 | 否 |
-| PNG 长图导出 | `QTextDocument::drawContents()` + `QPainter` → QImage | 否 |
+| Markdown 渲染 | `QTextDocument::setMarkdown()`，支持 CommonMark + GFM | Qt Widgets（已有） |
+| 图片嵌入 | `QTextDocument::addResource(ImageResource, ...)` | Qt Widgets（已有） |
+| PDF 导出 | `QPrinter(PdfFormat)` + `QTextDocument::print()` 自动分页 | **Qt PrintSupport（新增）** |
+| PNG 长图导出 | `QTextDocument::drawContents()` + `QPainter` → QImage | Qt Widgets（已有） |
 
-**结论：无需新增 Qt 模块依赖，现有 `find_package(Qt6 REQUIRED COMPONENTS Widgets)` 足够。**
+**新增依赖**：`Qt6::PrintSupport`（PDF 导出用）。部署时 `windeployqt` 会自动带上 `Qt6PrintSupport.dll`。
 
-## 三、数据模型变更（src/core/）
+## 三、数据模型（src/core/）
 
-### 3.1 新增 Article 结构
+### 3.1 Article 结构
 
 ```cpp
-// 文章攻略：基于 Markdown 的文本攻略，与 Walkthrough（图文攻略）平级。
+// 文章攻略：基于 Markdown 的文本攻略。
 struct Article {
-    QString strId;           // 唯一 id
+    QString strId;           // 唯一 id（QUuid 字符串）
     QString strTitle;        // 文章标题
     QString strMarkdown;     // Markdown 正文（内嵌，含 ![[W:P]] 页面引用与 ![](assets/...) 图片引用）
 };
 ```
 
-### 3.2 Project 新增字段
+### 3.2 Walkthrough 内嵌文章
 
 ```cpp
-struct Project {
-    // ... 现有字段不变 ...
-    QVector<Article> vecArticles;   // 文章攻略列表（与 vecWalkthroughs 平级）
+struct Walkthrough {
+    QString strTitle;
+    E_WALKTHROUGH_TYPE eType;
+    QVector<Page> vecPages;        // 页面（图文）
+    QVector<Article> vecArticles;  // 文章（Markdown，与页面同级）
 };
 ```
 
 ### 3.3 序列化（ProjectSerializer）
 
-- `walkthroughs` 之外新增 `articles` 数组，每个元素 `{id, title, markdown}`。
-- `formatVersion` 保持 1 不变（新增字段对旧文件向后兼容：缺失时 `vecArticles` 为空）。
-- Markdown 正文内嵌 project.json。几万字以内完全无压力，`QJsonDocument` 处理几百 KB JSON 很轻松。
-- 旧版本软件打开含 articles 的新文件时，未知字段被 QJsonDocument 容错忽略，不会崩溃。
+- 攻略对象内新增 `articles` 数组，每个元素 `{id, title, markdown}`。
+- `formatVersion` 保持 1：缺失字段取默认值，旧文件可正常打开。
+- **旧格式迁移**：早期版本把 articles 存在 project 级（`Project::vecArticles`，现已废弃）。
+  反序列化时自动迁移到第一个攻略内；若项目无攻略则新建"迁移文章"攻略存放。
+- Markdown 正文内嵌 `project.json`，几万字以内无性能压力。
 
 ### 3.4 页面引用语法（本项目自定义扩展）
 
-- 语法：`![[W:P]]` 表示引用第 W 个图文攻略的第 P 页（类似 Obsidian 嵌入语法，与标准图片 `![](url)` 视觉区分）。
-- 解析：正则 `!\[\[(\d+):(\d+)\]\]` 匹配，用现有 `ExportRenderer::renderPage()` 渲染该页为 QImage，通过 `QTextDocument::addResource(ImageResource, ...)` 注入显示。
-- 该语法不干扰标准 Markdown 解析（`setMarkdown` 会把它当普通文本，我们在渲染前后做替换注入）。
+- 语法：`![[W:P]]` —— 引用第 W 个攻略的第 P 个页面（类似 Obsidian 嵌入语法，与标准图片 `![](url)` 视觉区分）。
+- 解析：正则 `!\[\[(\d+):(\d+)\]\]`（`kPageRefPattern`，见 `core/Article.h`）。
+- 渲染：替换为 `![](bwm://page/W/P)` 图片语法 → `setMarkdown` 后注册 `QImage` 为 document resource。
+- 标准 Markdown 解析器不会误判（该语法在标准 Markdown 中是普通文本）。
 
-## 四、UI 变更（src/app/）
+## 四、UI 实现（src/app/）
 
 ### 4.1 中央区域切换
 
-MainWindow 中央区域由"纯画布"改为**按当前选中节点类型切换**（QStackedWidget）：
+`MainWindow` 中央区域是 `QStackedWidget`：
 
-- 选中页面节点（图文）→ CanvasView（现有行为不变）
-- 选中文章节点 → ArticleEditor（新）
+- 选中页面节点 → index 0（`CanvasView` 画布），右侧显示素材库 / 图层面板
+- 选中文章节点 → index 1（`ArticleEditor`），**隐藏**右侧面板（它们是画布专用）
 
-### 4.2 ArticleEditor（新增 src/app/panels/ArticleEditor.h/.cpp）
+### 4.2 ArticleEditor（分栏编辑器）
 
-分栏布局（QSplitter），对标 Typora / 小黑盒编辑器：
+`src/app/panels/ArticleEditor.h/.cpp`：
 
-- **左侧**：`QTextEdit` 纯文本编辑（Markdown 源码）。工具栏按钮：加粗 / 斜体 / 标题 / 列表 / 链接 / 图片 / 页面引用。
-- **右侧**：`QTextBrowser` 实时预览。`setMarkdown()` 渲染，重写 `loadResource` 加载项目内图片与页面引用渲染图。
-- 左侧编辑防抖（QTimer 300ms）触发右侧重新预览。
+- 左侧 `QTextEdit`：Markdown 源码编辑（等宽字体）
+- 右侧 `MarkdownPreview`：实时预览，300ms 防抖
+- 工具栏：加粗 / 斜体 / 标题 / 列表 / 链接 / 图片 / 页面引用
+- 页面引用按钮弹出**图形化页面选择器**（列出所有攻略的所有页面），无需手输 W:P
+- 图片按钮：选本地图片 → 复制进项目 `assets/` → 插入相对路径引用
+- 编辑后发出 `articleModified` 信号，MainWindow 同步回模型并标记 dirty
 
-### 4.3 项目树面板变更（ProjectTreePanel）
+### 4.3 MarkdownPreview（预览控件）
 
-**组织方式：扁平混排靠图标区分**（已确认）
+`src/app/panels/MarkdownPreview.h/.cpp`：
 
-- 所有攻略平级列出，图文攻略与文章攻略用不同图标区分。
-- 节点键格式扩展：
-  - `""` → 项目根
-  - `"W"` → 图文攻略节点
-  - `"W:P"` → 页面节点
-  - `"A"` → 文章攻略节点（新增）
-- 右键项目根：新建图文攻略 / 新建文章（含"从 .md 文件导入"）。
-- 右键文章节点：重命名、删除、导出。
-- 选中文章节点 → 发出 `articleSelected(QString articleKey)` 信号 → MainWindow 切换到 ArticleEditor。
+- 继承 `QTextBrowser`，`setMarkdownSource()` 渲染
+- 解析 `![[W:P]]` → 渲染页面为 QImage（0.5 倍率）→ 注册 resource
+- 遍历 document 中所有 `QTextImageFormat`，加载普通图片并注册 resource
+- 图片最大宽度限制为预览区宽度，避免大图撑满
 
-### 4.4 导出对话框扩展（ExportDialog）
+### 4.4 项目树（ProjectTreePanel）
 
-当当前对象是文章时，格式下拉框出现：
+节点键格式：
 
-- **Markdown (.md)**：导出原始 .md + images/ 目录（页面引用渲染图）+ 兼容版 .md
-- **PNG 长图**：渲染文章为单张长图 PNG
-- **PDF**：渲染文章为分页 PDF
+| 键 | 含义 |
+|---|---|
+| `""` | 项目根 |
+| `"W"` | 攻略节点 |
+| `"W:P"` | 页面节点 |
+| `"W:A文章索引"` | 文章节点（如 `"0:A0"`） |
 
-## 五、插件接口变更（src/plugin/）
+右键菜单：
 
-`IExportProvider` 现有 `exportPages(QVector<Page>)` 只针对页面。为支持文章导出，**增加重载方法（向后兼容）**：
+- 项目根 → 新建攻略
+- 攻略节点 → 新建页面 / 新建文章 / **从文件导入文章** / 重命名 / 删除
+- 文章节点 → 重命名文章 / 删除文章
+
+## 五、导入导出
+
+### 5.1 导入（.md → Article）
+
+`src/export/ArticleImporter.h/.cpp`：
+
+- 读取 `.md` / `.markdown` / `.txt`，标题取文件名（不含扩展名）
+- 本地图片 `![](xxx.png)`：若图片与 .md 同目录，复制到项目 `assets/`（UUID 命名避免重名）并改写路径
+- 跳过网络 URL（`http://` / `https://`）和已是 `assets/` 的路径
+- 外部 .md 中的 `![[W:P]]` 原样保留
+
+### 5.2 导出 Provider（src/plugin/builtin/BuiltinArticleExportProviders.*）
+
+| 格式 | formatId | 产物 |
+|---|---|---|
+| Markdown 文件 | `article.markdown` | `文章名.md`（原样，保留 `![[W:P]]`）+ `文章名_compatible.md`（引用替换为图片）+ `images/`（页面渲染图 + 素材副本） |
+| PNG 长图 | `article.png.longimage` | `文章名.png`，宽 1080，高度自适应 |
+| PDF 文档 | `article.pdf` | `文章名.pdf`，A4 自动分页 |
+
+### 5.3 IExportProvider 接口扩展
+
+为支持文章导出，在原有 `exportPages()` 基础上新增（**向后兼容**）：
 
 ```cpp
-class IExportProvider {
-    // 现有：页面型导出（图文攻略），不变
-    virtual int exportPages(const QVector<Page>& vecPages, ...) = 0;
-    // 新增：文章型导出，默认实现返回 0（不支持）
-    virtual int exportArticle(const Article& rArticle, const Project& rProject,
-                              const QString& strDirPath, const PluginContext& rContext,
-                              QWidget* pParent) const { return 0; }
-    // 新增：声明是否支持文章导出，导出对话框据此过滤
-    virtual bool supportsArticle() const { return false; }
-};
+// 是否支持文章导出（页面型 Provider 返回 false）
+virtual bool supportsArticle() const { return false; }
+
+// 文章导出（默认返回 0 = 不支持）
+virtual int exportArticle(const Article& rArticle, const Project& rProject,
+                           const QString& rArticleTitle, const QString& strDirPath,
+                           const PluginContext& rContext, QWidget* pParent) const
+{ return 0; }
 ```
 
-ExportDialog 根据当前选中对象类型（页面 vs 文章）+ Provider 的 `supportsArticle()` 过滤可选格式。
+`ExportDialog` 根据当前选中对象（文章 / 页面）自动切换模式：文章模式只列出 `supportsArticle()` 为 true 的 Provider，并隐藏范围 / 倍率选项。
 
-## 六、导入（.md → Article）
+### 5.4 导出完成提示
 
-- 项目树右键"新建文章 → 从文件导入"，读取 .md 存入 `Article::strMarkdown`。
-- .md 中本地图片 `![](xxx.png)`：若图片在同目录，复制进项目 `assets/` 并改写路径为 `![](assets/xxx.png)`。
-- 外部 .md 中的 `![[W:P]]` 原样保留（视为普通文本，不影响导入）。
+`src/export/ExportResultHelper.h/.cpp` 提供共享的 `showExportResult()`：
+显示"导出完成"对话框 + "打开目录"按钮（页面导出与文章导出统一体验）。
 
-## 七、导出（Article → .md + PNG + PDF）
+**约定**：`pParent` 为 `nullptr` 时不显示提示——便于自动化测试静默调用（否则模态对话框会阻塞测试）。
 
-| 格式 | 处理 |
-|---|---|
-| .md | 主文件原样输出（保留 `![[W:P]]`）；images/ 导出页面引用渲染图；额外输出兼容版 .md（`![[W:P]]` → `![](images/page_W_P.png)`） |
-| PNG 长图 | 构造 QTextDocument 渲染，QPainter 画到单张高 QImage（宽 1080，高自适应） |
-| PDF | 同上构造 QTextDocument，QPrinter(PdfFormat) + print() 自动分页 |
+## 六、渲染实现要点（src/export/ArticleRenderer.*）
 
-### 7.1 导出 .md 细节
+文章渲染辅助工具，供三个导出 Provider 共用：
 
-- 主文件：原样输出 `Article::strMarkdown`（保留 `![[W:P]]`）。
-- images/ 目录：对所有 `![[W:P]]` 引用，用 `ExportRenderer::renderPage()` 渲染为 `images/page_W_P.png`。
-- 兼容版 `*_compatible.md`：把 `![[W:P]]` 替换为 `![](images/page_W_P.png)`，外部 Markdown 阅读器可直接看图。
-- 对 `![](assets/xxx.png)` 引用：把对应素材文件复制到 images/，路径改写为相对路径。
+```cpp
+// 构造渲染好的 QTextDocument（调用方负责 delete）
+static QTextDocument* buildDocument(const Article& rArticle, const Project& rProject,
+                                     const PluginContext& rContext, int nImageWidth = 1000);
+```
 
-### 7.2 导出 PNG 长图
+处理流程：
 
-- 构造 QTextDocument，setMarkdown + 注入所有图片 / 页面引用资源。
-- 用 QPainter 渲染到单张高 QImage（宽度固定如 1080，高度按文档内容自适应）。
+1. 解析 `![[W:P]]` → 替换为 `![](bwm://page/W/P)`
+2. 设置默认样式表：**文字颜色跟随主题**（修复深色主题下黑字不可见）+ **字号按图片宽度缩放**
+3. `setMarkdown()` 渲染
+4. 注册页面引用图片 resource
+5. 遍历图片：加载普通图片、注册 resource、限制最大宽度
+6. 遍历文字 fragment：统一设置前景色为主题文字色（跳过图片）
 
-### 7.3 导出 PDF
+### 字号策略
 
-- 同上构造 QTextDocument。
-- QPrinter(PdfFormat) + QTextDocument::print()，自动多页分页。
+字号与图片宽度成比例：`正文 = 宽度 × 44 / 1080`
 
-## 八、新增 / 修改文件清单
+| 元素 | 1080 宽时 | 800 宽时（PDF） |
+|---|---|---|
+| 一级标题 | 88 px | 65 px |
+| 二级标题 | 66 px | 48 px |
+| 三级标题 | 53 px | 39 px |
+| 正文 | 44 px（一行约 24 字） | 32 px |
+| 代码块 | 40 px | 29 px |
 
-### 新增文件
+## 七、文件清单
+
+### 新增
 
 | 文件 | 作用 |
 |---|---|
-| `src/core/Article.h` / `.cpp` | Article 结构与辅助函数 |
-| `src/app/panels/ArticleEditor.h` / `.cpp` | 分栏编辑器（左编辑右预览） |
-| `src/app/panels/MarkdownPreview.h` / `.cpp` | 预览控件（重写 loadResource，处理页面引用） |
-| `src/plugin/builtin/BuiltinArticleExportProviders.h` / `.cpp` | 文章导出 Provider（md / png / pdf） |
-| `src/core/ArticlePageRef.h` / `.cpp` | `![[W:P]]` 解析与渲染工具 |
-| `tests/core/test_article.cpp` | Article 序列化测试 |
-| `tests/core/test_articlepageref.cpp` | 页面引用解析测试 |
+| `src/core/Article.h/.cpp` | Article 结构 + 页面引用工具函数（`makePageRef` / `containsPageRef`） |
+| `src/app/panels/ArticleEditor.h/.cpp` | 分栏编辑器 |
+| `src/app/panels/MarkdownPreview.h/.cpp` | 预览控件 |
+| `src/export/ArticleRenderer.h/.cpp` | 渲染辅助（页面引用、图片、字号、颜色） |
+| `src/export/ArticleImporter.h/.cpp` | .md 导入 |
+| `src/export/ExportResultHelper.h/.cpp` | 导出完成提示共享实现 |
+| `src/plugin/builtin/BuiltinArticleExportProviders.h/.cpp` | 三个文章导出 Provider |
+| `tests/core/test_article.cpp` | 数据模型与序列化测试（9 个用例） |
+| `tests/export/test_article_export.cpp` | 导入导出测试（10 个用例） |
 
-### 修改文件
+### 修改
 
-| 文件 | 修改内容 |
+| 文件 | 改动 |
 |---|---|
-| `src/core/Project.h` | 新增 `Article` 结构与 `vecArticles` 字段 |
-| `src/core/ProjectSerializer.cpp` | 序列化 / 反序列化 articles 数组 |
-| `src/app/panels/ProjectTreePanel.h` / `.cpp` | 文章节点显示、右键菜单、图标区分 |
-| `src/app/MainWindow.h` / `.cpp` | 中央 QStackedWidget 切换、articleSelected 信号处理 |
-| `src/app/dialogs/ExportDialog.h` / `.cpp` | 文章导出格式选项 |
-| `src/plugin/IExportProvider.h` | 新增 exportArticle / supportsArticle |
-| `src/plugin/builtin/BuiltinPluginRegistrar.cpp` | 注册文章导出 Provider |
-| `src/CMakeLists.txt` | 新增源文件 |
-| `docs/project-plan.md` | 补充文章攻略模块说明 |
+| `src/core/Project.h` | `Walkthrough` 新增 `vecArticles`；`Project::vecArticles` 标记废弃 |
+| `src/core/ProjectSerializer.cpp` | 攻略内 articles 读写 + 旧格式迁移 |
+| `src/app/MainWindow.h/.cpp` | 中央 `QStackedWidget` 切换、文章信号路由、导出入口 |
+| `src/app/panels/ProjectTreePanel.h/.cpp` | 文章节点、右键菜单、从文件导入 |
+| `src/app/dialogs/ExportDialog.h/.cpp` | 文章导出模式 |
+| `src/plugin/IExportProvider.h` | `supportsArticle` / `exportArticle` |
+| `src/plugin/builtin/BuiltinPluginRegistrar.cpp` | 注册三个文章导出 Provider |
+| `src/plugin/builtin/BuiltinExportProviders.cpp` | 改用共享 `showExportResult` |
+| `CMakeLists.txt` / `src/CMakeLists.txt` / `tests/CMakeLists.txt` | 新源文件 + PrintSupport 依赖 |
 
-## 九、实施分期建议
+## 八、测试覆盖
 
-每期可独立编译提交，保持可编译可测试：
+```
+ctest 6/6 通过
 
-### 第一期：数据层
+test_article（9 个用例）
+  ├─ 攻略内文章序列化往返
+  ├─ ![[W:P]] 标记往返保留
+  ├─ 旧文件无 articles 字段兼容
+  ├─ 旧格式 project 级 articles 自动迁移
+  ├─ 页面与文章混合
+  ├─ 缺失字段取默认值
+  ├─ 损坏条目跳过
+  └─ makePageRef / containsPageRef
 
-- Article 结构定义
-- ProjectSerializer 读写 articles
-- 单元测试（序列化往返、向后兼容）
-- 可独立编译验证
+test_article_export（10 个用例）
+  ├─ .md 基本导入
+  ├─ 导入时复制图片并改写路径
+  ├─ buildDocument 构造文档
+  ├─ Markdown 导出（主文件 + 兼容版）
+  ├─ PNG 导出
+  ├─ 深色主题下文字可见（像素级验证，防回归）
+  ├─ PDF 导出
+  └─ 文件名净化
+```
 
-### 第二期：编辑器
+## 九、实施记录
 
-- ArticleEditor 分栏编辑器
-- MarkdownPreview 预览控件
-- 项目树扩展（文章节点、图标、右键菜单）
-- MainWindow 中央切换
-- 暂不含页面引用渲染（`![[W:P]]` 显示为原文）
+| 期次 | 提交 | 内容 |
+|---|---|---|
+| 一 | `a9c9c8d` | Article 结构 + ProjectSerializer + 测试 |
+| 二 | `7189c95` | ArticleEditor + MarkdownPreview + 项目树文章节点 |
+| 修复 | `ad574f4` | 文章改为攻略内嵌（原设计为平级）+ 选中文章时隐藏右侧面板 |
+| 三 | `27882f5` | `![[W:P]]` 预览渲染 + 图形化页面选择器 + 图片渲染修复 |
+| 四 | `6679194` | .md 导入 + 三种导出格式 + 完成提示 + 字号调整 |
 
-### 第三期：页面引用
+### 实施中发现并修复的问题
 
-- `![[W:P]]` 解析（ArticlePageRef）
-- 预览时渲染注入（ExportRenderer::renderPage → QTextDocument resource）
-- 编辑器工具栏"插入页面引用"按钮
+1. **moc 对 raw string 的解析**：`test_article.cpp` 中的多行 raw string 导致 moc 报 "missing ')' in macro usage"，
+   改用字符串拼接构造 JSON 测试数据。
+2. **图片 resource 注册顺序**：必须在 `setMarkdown()` **之后**注册 resource，否则被重建的 document 清除。
+3. **图片 URL 匹配**：`QTextImageFormat::name()` 返回的 URL 与原始 Markdown 一致，
+   但必须用 `QTextBlock::iterator` 遍历 fragment 获取（`QTextCursor` 逐字符移动拿不到）。
+4. **项目目录未设置**：`ArticleEditor` 构造时项目尚未打开，`setProjectDirectory` 未生效导致图片路径无法解析，
+   改为在 `onProjectOpened` 时通过 `setProjectContext()` 更新。
+5. **深色主题文字不可见**：`setMarkdown` 默认黑字 + 深色背景 → 设置主题文字色。
+6. **字号过小**：默认 12pt 在 1080 宽图上过小 → 按宽度比例缩放。
+7. **模态对话框阻塞测试**：`showExportResult` 在测试中无人点击导致 90 秒超时 →
+   约定 `pParent == nullptr` 时静默。
+8. **链接失败（Permission denied）**：`bwm.exe` 正在运行导致链接器无法写入，编译前需先结束进程。
 
-### 第四期：导入导出
+## 十、后续可扩展方向
 
-- .md 文件导入（含图片复制与路径改写）
-- .md 导出（原样 + 兼容版 + images/）
-- PNG 长图导出
-- PDF 导出
-- ExportDialog 扩展
-
-每期完成后向用户汇报，确认后再进入下一期。
+- 文章内嵌表格的富样式（当前表格由 Markdown 语法生成，样式固定）
+- 页面引用的尺寸控制（如 `![[0:0|600]]` 指定宽度）
+- 文章目录（根据标题自动生成 TOC）
+- 导出时选择「浅色 / 深色」主题（当前跟随项目主题）
