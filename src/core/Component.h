@@ -34,6 +34,15 @@ enum E_STICKER_TYPE {
     E_STICKER_TYPE_CARD_BORDER,      // 卡片边框
 };
 
+// 卡片边框形状（仅 E_STICKER_TYPE_CARD_BORDER 使用）。
+// 正方形/圆形取组件矩形的内接图形（居中）；椭圆/矩形填满组件矩形。
+enum E_CARD_BORDER_SHAPE {
+    E_CARD_BORDER_SHAPE_RECTANGLE = 0,   // 圆角矩形（默认，与旧版本一致）
+    E_CARD_BORDER_SHAPE_SQUARE,          // 正方形（内接）
+    E_CARD_BORDER_SHAPE_CIRCLE,          // 圆形（内接）
+    E_CARD_BORDER_SHAPE_ELLIPSE,         // 椭圆（填满）
+};
+
 // 形状子类型
 enum E_SHAPE_TYPE {
     E_SHAPE_TYPE_RECTANGLE = 0,   // 矩形
@@ -81,6 +90,10 @@ struct TableData {
 struct StickerData {
     E_STICKER_TYPE eStickerType = E_STICKER_TYPE_TITLE_LINE;   // 贴纸类型
     QColor color = QColor(0, 120, 215);                        // 主色
+    // 卡片边框形状（eStickerType == E_STICKER_TYPE_CARD_BORDER 时有效）。
+    // 四种形状合并到「卡片边框」一个插入项，作为插入后（或插入时）可切换的选项，
+    // 不在「插入」菜单里拆成多个菜单项。
+    E_CARD_BORDER_SHAPE eBorderShape = E_CARD_BORDER_SHAPE_RECTANGLE;
 };
 
 // 组件：画布元素。数据与渲染分离——本结构仅存数据，渲染由 editor/ComponentItem 完成。
@@ -108,6 +121,8 @@ QString shapeTypeToString(E_SHAPE_TYPE eShapeType);
 E_SHAPE_TYPE shapeTypeFromString(const QString& strShapeType);
 QString stickerTypeToString(E_STICKER_TYPE eStickerType);
 E_STICKER_TYPE stickerTypeFromString(const QString& strStickerType);
+QString cardBorderShapeToString(E_CARD_BORDER_SHAPE eShape);
+E_CARD_BORDER_SHAPE cardBorderShapeFromString(const QString& strShape);
 QString colorToString(const QColor& rColor);
 QColor colorFromString(const QString& strColor);
 
@@ -148,7 +163,9 @@ inline bool operator==(const TableData& rLeft, const TableData& rRight)
 
 inline bool operator==(const StickerData& rLeft, const StickerData& rRight)
 {
-    return rLeft.eStickerType == rRight.eStickerType && rLeft.color == rRight.color;
+    return rLeft.eStickerType == rRight.eStickerType
+        && rLeft.color == rRight.color
+        && rLeft.eBorderShape == rRight.eBorderShape;
 }
 
 inline bool operator==(const Component& rLeft, const Component& rRight)

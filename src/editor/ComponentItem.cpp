@@ -31,6 +31,7 @@
 
 #include "editor/CanvasScene.h"
 #include "core/ComponentPainter.h"
+#include "plugin/builtin/CardBorderDialog.h"
 
 namespace bwm {
 
@@ -395,6 +396,12 @@ void ComponentItem::editContent()
 
 void ComponentItem::editStickerContent()
 {
+    // 卡片边框有专属设置对话框（形状 + 颜色），不走「只选颜色」的简化流程
+    if (m_component.stickerData.eStickerType == E_STICKER_TYPE_CARD_BORDER) {
+        editCardBorder();
+        return;
+    }
+
     emit editStarted();
     const QColor chosen = QColorDialog::getColor(m_component.stickerData.color, nullptr,
                                                  QStringLiteral("选择贴纸颜色"));
@@ -403,6 +410,29 @@ void ComponentItem::editStickerContent()
         update();
         emit geometryChanged();
     }
+    emit editFinished();
+}
+
+void ComponentItem::editCardBorder()
+{
+    emit editStarted();
+
+    const QSizeF sizeBefore = m_component.size;
+    CardBorderDialog dialog(nullptr, m_component.stickerData);
+    if (dialog.exec() == QDialog::Accepted) {
+        m_component.stickerData = dialog.stickerData();
+        // 正方形/圆形按组件内接正方形绘制：把尺寸归一为 1:1（以短边为准，位置不变）
+        if (dialog.needsSquareSize()) {
+            const qreal dSide = qMin(m_component.size.width(), m_component.size.height());
+            m_component.size = QSizeF(dSide, dSide);
+        }
+        if (m_component.size != sizeBefore) {
+            prepareGeometryChange();   // 尺寸变化：让场景重算包围盒
+        }
+        update();
+        emit geometryChanged();
+    }
+
     emit editFinished();
 }
 

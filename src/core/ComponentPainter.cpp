@@ -28,6 +28,36 @@ void drawStar(QPainter* pPainter, const QPointF& rCenter, qreal dRadius)
     pPainter->drawPolygon(polygon);
 }
 
+// 卡片边框的外框区域：正方形/圆形取组件矩形的内接正方形（居中），
+// 矩形/椭圆填满整个组件矩形
+QRectF cardBorderOuterRect(const QRectF& rRect, E_CARD_BORDER_SHAPE eShape)
+{
+    if (eShape != E_CARD_BORDER_SHAPE_SQUARE && eShape != E_CARD_BORDER_SHAPE_CIRCLE) {
+        return rRect;
+    }
+    const qreal dSide = qMin(rRect.width(), rRect.height());
+    return QRectF(rRect.center().x() - dSide / 2.0, rRect.center().y() - dSide / 2.0,
+                  dSide, dSide);
+}
+
+// 按形状构造边框路径：圆形/椭圆为椭圆，矩形/正方形为圆角矩形（圆角半径仅这两种用到）
+QPainterPath cardBorderPath(const QRectF& rRect, E_CARD_BORDER_SHAPE eShape, qreal dCornerRadius)
+{
+    QPainterPath path;
+    switch (eShape) {
+    case E_CARD_BORDER_SHAPE_CIRCLE:
+    case E_CARD_BORDER_SHAPE_ELLIPSE:
+        path.addEllipse(rRect);
+        break;
+    case E_CARD_BORDER_SHAPE_SQUARE:
+    case E_CARD_BORDER_SHAPE_RECTANGLE:
+    default:
+        path.addRoundedRect(rRect, dCornerRadius, dCornerRadius);
+        break;
+    }
+    return path;
+}
+
 } // namespace
 
 void ComponentPainter::paint(QPainter* pPainter, const Component& rComponent,
@@ -178,12 +208,23 @@ void ComponentPainter::paint(QPainter* pPainter, const Component& rComponent,
         }
         case E_STICKER_TYPE_CARD_BORDER:
         default: {
-            // 卡片边框：外框 + 内框
-            pPainter->setPen(QPen(color, 3));
+            // 卡片边框：按形状绘制双层线（外粗内细）。
+            // 矩形/正方形 → 圆角矩形（矩形时与原实现像素一致）；圆形/椭圆 → 椭圆；
+            // 正方形/圆形取组件内接正方形，居中绘制。
+            const E_CARD_BORDER_SHAPE eShape = rSticker.eBorderShape;
+            const QRectF outerRect = cardBorderOuterRect(rect, eShape);
+            constexpr qreal dGap = 6;   // 内外框间距（与原实现一致）
+
             pPainter->setBrush(Qt::NoBrush);
-            pPainter->drawRoundedRect(rect, 8, 8);
-            pPainter->setPen(QPen(color, 1));
-            pPainter->drawRoundedRect(rect.adjusted(6, 6, -6, -6), 5, 5);
+            pPainter->setPen(QPen(color, 3));
+            pPainter->drawPath(cardBorderPath(outerRect, eShape, 8));
+
+            // 内框：与外框保持 dGap 间距；尺寸过小时不再绘制，避免两圈线重叠成一团
+            const QRectF innerRect = outerRect.adjusted(dGap, dGap, -dGap, -dGap);
+            if (innerRect.width() > 2 && innerRect.height() > 2) {
+                pPainter->setPen(QPen(color, 1));
+                pPainter->drawPath(cardBorderPath(innerRect, eShape, 5));
+            }
             break;
         }
         }

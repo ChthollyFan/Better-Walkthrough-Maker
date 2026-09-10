@@ -1222,11 +1222,16 @@ void MainWindow::onCanvasContextMenu(const QPointF& rScenePos)
         if(eType == E_COMPONENT_TYPE_TEXT || eType == E_COMPONENT_TYPE_TABLE
            || eType == E_COMPONENT_TYPE_STICKER) {
             menu.addSeparator();
+            // 贴纸里只有卡片边框有可编辑的形状选项，文案单独区分
+            const bool bCardBorder = eType == E_COMPONENT_TYPE_STICKER
+                && pHitItem->component().stickerData.eStickerType == E_STICKER_TYPE_CARD_BORDER;
             pEditTextAction = menu.addAction(eType == E_COMPONENT_TYPE_TEXT
                                                  ? QStringLiteral("编辑文本…")
                                                  : eType == E_COMPONENT_TYPE_TABLE
                                                      ? QStringLiteral("编辑表格…")
-                                                     : QStringLiteral("编辑贴纸…"));
+                                                     : bCardBorder
+                                                         ? QStringLiteral("编辑卡片边框…")
+                                                         : QStringLiteral("编辑贴纸…"));
         }
         menu.addSeparator();
         pLockAction = menu.addAction(pHitItem->component().bLocked

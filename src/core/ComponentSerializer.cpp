@@ -61,6 +61,11 @@ QJsonObject ComponentSerializer::toJson(const Component& rComponent)
         stickerObject.insert(QStringLiteral("stickerType"),
                              stickerTypeToString(rComponent.stickerData.eStickerType));
         stickerObject.insert(QStringLiteral("color"), colorToString(rComponent.stickerData.color));
+        // 卡片边框形状：仅卡片边框写入（其它贴纸无此属性），空字段保持 JSON 精简
+        if (rComponent.stickerData.eStickerType == E_STICKER_TYPE_CARD_BORDER) {
+            stickerObject.insert(QStringLiteral("borderShape"),
+                                 cardBorderShapeToString(rComponent.stickerData.eBorderShape));
+        }
         componentObject.insert(QStringLiteral("sticker"), stickerObject);
     } else {
         QJsonObject shapeObject;
@@ -129,6 +134,9 @@ Component ComponentSerializer::fromJson(const QJsonObject& rComponentObject)
         ? stickerTypeFromString(stickerTypeValue.toString())
         : E_STICKER_TYPE_TITLE_LINE;
     component.stickerData.color = colorFromString(stickerObject.value(QStringLiteral("color")).toString());
+    // 卡片边框形状：旧文件无该字段时按矩形（与旧版本视觉一致）
+    component.stickerData.eBorderShape = cardBorderShapeFromString(
+        stickerObject.value(QStringLiteral("borderShape")).toString());
 
     const QJsonObject shapeObject = rComponentObject.value(QStringLiteral("shape")).toObject();
     const QJsonValue shapeTypeValue = shapeObject.value(QStringLiteral("shapeType"));

@@ -9,6 +9,7 @@
  */
 #include "plugin/builtin/BuiltinComponentProviders.h"
 
+#include "plugin/builtin/CardBorderDialog.h"
 #include "project/AssetStore.h"
 #include "settings/Settings.h"
 
@@ -270,6 +271,31 @@ Component StickerComponentProvider::createComponent(const PluginContext& rContex
         break;
     }
     return component;
+}
+
+bool StickerComponentProvider::requiresInputDialog() const
+{
+    // 卡片边框的四种形状合并在这一个插入项里，插入时先让用户选形状与颜色；
+    // 其它贴纸保持「直接插入」的原有行为。
+    return m_eStickerType == E_STICKER_TYPE_CARD_BORDER;
+}
+
+bool StickerComponentProvider::showInputDialog(QWidget* pParent, Component& rComponent,
+                                               const PluginContext& rContext) const
+{
+    (void)rContext;
+    CardBorderDialog dialog(pParent, rComponent.stickerData);
+    if(dialog.exec() != QDialog::Accepted) {
+        return false;   // 用户取消
+    }
+    rComponent.stickerData = dialog.stickerData();
+    // 正方形/圆形按组件内接正方形绘制：把组件尺寸归一为 1:1（以短边为准），
+    // 使选择手柄与图形边界一致，不出现「框比图形大一圈」
+    if(dialog.needsSquareSize()) {
+        const qreal dSide = qMin(rComponent.size.width(), rComponent.size.height());
+        rComponent.size = QSizeF(dSide, dSide);
+    }
+    return true;
 }
 
 } // namespace bwm

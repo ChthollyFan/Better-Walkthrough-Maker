@@ -113,6 +113,36 @@ E_STICKER_TYPE stickerTypeFromString(const QString& strStickerType)
     return E_STICKER_TYPE_TITLE_LINE;
 }
 
+QString cardBorderShapeToString(E_CARD_BORDER_SHAPE eShape)
+{
+    switch (eShape) {
+    case E_CARD_BORDER_SHAPE_SQUARE:
+        return QStringLiteral("square");
+    case E_CARD_BORDER_SHAPE_CIRCLE:
+        return QStringLiteral("circle");
+    case E_CARD_BORDER_SHAPE_ELLIPSE:
+        return QStringLiteral("ellipse");
+    case E_CARD_BORDER_SHAPE_RECTANGLE:
+    default:
+        return QStringLiteral("rectangle");
+    }
+}
+
+E_CARD_BORDER_SHAPE cardBorderShapeFromString(const QString& strShape)
+{
+    if (strShape == QStringLiteral("square")) {
+        return E_CARD_BORDER_SHAPE_SQUARE;
+    }
+    if (strShape == QStringLiteral("circle")) {
+        return E_CARD_BORDER_SHAPE_CIRCLE;
+    }
+    if (strShape == QStringLiteral("ellipse")) {
+        return E_CARD_BORDER_SHAPE_ELLIPSE;
+    }
+    // 缺失或未知形状按矩形处理，保证旧文件可打开
+    return E_CARD_BORDER_SHAPE_RECTANGLE;
+}
+
 QString colorToString(const QColor& rColor)
 {
     // 统一输出 #RRGGBB（不支持透明时省略 alpha；M2 范围无透明度需求）

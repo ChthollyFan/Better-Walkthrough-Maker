@@ -69,6 +69,8 @@ private:
     void editTextContent();
     void editTableContent();
     void editStickerContent();
+    // 卡片边框：弹专用对话框改形状（矩形/正方形/圆形/椭圆）与颜色
+    void editCardBorder();
     qreal handleHitRadius() const;
 
     Component m_component;                    // 组件数据副本

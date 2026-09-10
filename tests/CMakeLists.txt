@@ -2,6 +2,7 @@
 find_package(Qt6 REQUIRED COMPONENTS Test)
 
 set(TEST_SOURCES
+  core/test_card_border.cpp
   core/test_page_background.cpp
   core/test_project_serialization.cpp
   core/test_project_manager.cpp
