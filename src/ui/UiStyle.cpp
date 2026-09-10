@@ -11,9 +11,9 @@
 
 namespace bwm {
 
-const QString UiStyleManager::kSystemId = QStringLiteral("system");
-const QString UiStyleManager::kAcrylicDarkId = QStringLiteral("acrylic-dark");
-const QString UiStyleManager::kAcrylicLightId = QStringLiteral("acrylic-light");
+const QString UiStyleManager::kDarkId = QStringLiteral("dark");
+const QString UiStyleManager::kLightId = QStringLiteral("light");
+const QString UiStyleManager::kAutoId = QStringLiteral("auto");
 
 namespace {
 
@@ -70,37 +70,54 @@ void UiStyleManager::registerProvider(IUiStyleProvider* pProvider)
     }
 }
 
-bool UiStyleManager::applyStyleById(const QString& rId, QWidget* pMainWindow)
+const IUiStyleProvider* UiStyleManager::providerForStyle(const QString& rId)
 {
-    if(rId == kSystemId) {
-        // system 风格：不做任何原生效果，返回 true 表示"已处理"
-        return true;
-    }
+    // 在所有已注册 Provider 中查找提供该风格 id 的那个
     for(const IUiStyleProvider* pProvider : registeredProviders()) {
-        // 检查该 Provider 是否提供此风格
-        bool bProvides = false;
-        for(const UiStyleDescriptor& desc : pProvider->styles()) {
-            if(desc.strId == rId) {
-                bProvides = true;
-                break;
+        for(const UiStyleDescriptor& rDesc : pProvider->styles()) {
+            if(rDesc.strId == rId) {
+                return pProvider;
             }
         }
-        if(bProvides && pProvider->applyStyle(rId, pMainWindow)) {
-            return true;
-        }
+    }
+    return nullptr;
+}
+
+bool UiStyleManager::applyStyleById(const QString& rId, QWidget* pMainWindow)
+{
+    const IUiStyleProvider* pProvider = providerForStyle(rId);
+    return pProvider ? pProvider->applyStyle(rId, pMainWindow) : false;
+}
+
+bool UiStyleManager::paintWindowBackground(QWidget* pMainWindow, QPainter& rPainter)
+{
+    const IUiStyleProvider* pProvider = providerForStyle(currentStyleId());
+    if(pProvider) {
+        return pProvider->paintBackground(currentStyleId(), pMainWindow, rPainter);
     }
     return false;
 }
 
+QColor UiStyleManager::canvasBackgroundColor()
+{
+    const IUiStyleProvider* pProvider = providerForStyle(currentStyleId());
+    if(pProvider) {
+        return pProvider->canvasBackgroundColor(currentStyleId());
+    }
+    return QColor();
+}
+
 bool UiStyleManager::applyCurrentStyle(QWidget* pMainWindow)
 {
-    const QString strId = currentStyleId();
-    if(applyStyleById(strId, pMainWindow)) {
+    if(applyStyleById(currentStyleId(), pMainWindow)) {
         return true;
     }
-    // 当前风格应用失败（如非 Windows 平台选了亚克力），回退到 system
-    // 注意：回退时不修改持久化设置，仅在本次运行降级
-    applyStyleById(kSystemId, pMainWindow);
+    // 当前风格不可用（如 Provider 卸载、持久化值失效），回退到第一个可用风格。
+    // 注意：回退只在本次运行生效，不修改持久化设置。
+    const QVector<UiStyleDescriptor> vecStyles = availableStyles();
+    if(!vecStyles.isEmpty()) {
+        return applyStyleById(vecStyles.first().strId, pMainWindow);
+    }
     return false;
 }
 

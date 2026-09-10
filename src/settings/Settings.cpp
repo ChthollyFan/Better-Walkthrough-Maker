@@ -83,7 +83,7 @@ void Settings::setThemeName(const QString& rName)
 QString Settings::uiStyle()
 {
     return settings().value(QStringLiteral("ui/style"),
-                            QStringLiteral("acrylic-dark")).toString();
+                            QStringLiteral("auto")).toString();
 }
 
 void Settings::setUiStyle(const QString& rId)

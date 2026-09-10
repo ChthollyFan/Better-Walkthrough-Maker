@@ -44,12 +44,15 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QShowEvent>
 #include <QCoreApplication>
 #include <QCursor>
 #include <QDesktopServices>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPair>
@@ -57,6 +60,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QStyleHints>
 #include <QTabWidget>
 #include <QToolBar>
 #include <QUndoStack>
@@ -115,8 +119,17 @@ MainWindow::MainWindow(QWidget* pParent)
     connect(m_pView, &CanvasView::contextMenuRequested,
             this, &MainWindow::onCanvasContextMenu);
 
-    applyTheme();   // 应用持久化的主题（画布背景色等）
-    applyUiStyle();  // 应用持久化的 UI 风格（亚克力等窗口外观）
+    applyTheme();   // 应用持久化的画布配色
+    applyUiStyle();  // 应用持久化的界面外观（玻璃风格）
+
+    // 系统深浅色变化时，若当前界面外观为「跟随系统」则重新应用外观。
+    // 样式表与渐变底都不做缓存，重新应用即可完整切换深浅。
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            this, [this](Qt::ColorScheme) {
+        if(UiStyleManager::currentStyleId() == UiStyleManager::kAutoId) {
+            applyUiStyle();
+        }
+    });
 }
 
 MainWindow::~MainWindow() = default;
@@ -127,6 +140,20 @@ void MainWindow::showEvent(QShowEvent* pEvent)
     // 窗口可见后重新应用 UI 风格，确保 DWM 亚克力模糊在窗口有可见区域后生效。
     // 幂等：DWM 属性与 stylesheet 重复设置无害。
     applyUiStyle();
+}
+
+void MainWindow::paintEvent(QPaintEvent* pEvent)
+{
+    // 委托当前 UI 风格绘制窗口背景（玻璃拟态风格会画一层彩色渐变底）。
+    // 若风格未提供背景绘制（使用接口默认实现），返回 false，
+    // 此时走 Qt 默认绘制，保证非玻璃风格的外观不受影响。
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    const bool bPainted = UiStyleManager::paintWindowBackground(this, painter);
+    painter.end();
+    if(!bPainted) {
+        QMainWindow::paintEvent(pEvent);
+    }
 }
 
 // =========================================================================
@@ -864,10 +891,19 @@ void MainWindow::applyTheme()
 
 void MainWindow::applyUiStyle()
 {
-    // 应用当前 UI 风格（亚克力等）到主窗口。非 Windows 或失败时回退 system。
+    // 应用当前 UI 风格（亚克力/玻璃等）到主窗口。
     // 不调用 applyTheme：画布背景由 CanvasScene 的页面矩形控制，不受窗口透明影响；
     // 且 applyTheme 会重建画布，showEvent 多次触发会丢失选中状态。
     UiStyleManager::applyCurrentStyle(this);
+
+    // 画布视口背景：玻璃风格返回全透明色，让窗口渐变透上来到画布区域；
+    // 其他风格返回无效色，此时恢复画布默认的深灰底。
+    const QColor canvasColor = UiStyleManager::canvasBackgroundColor();
+    m_pView->setBackgroundBrush(canvasColor.isValid() ? canvasColor
+                                                      : CanvasView::defaultBackgroundColor());
+
+    // 触发重绘以应用新的窗口背景渐变
+    update();
 }
 
 // =========================================================================

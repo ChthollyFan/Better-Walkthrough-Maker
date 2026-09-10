@@ -53,6 +53,8 @@ protected:
     void closeEvent(QCloseEvent* pEvent) override;
     // 窗口首次可见后重新应用 UI 风格（DWM 亚克力需窗口有可见区域后才生效）
     void showEvent(QShowEvent* pEvent) override;
+    // 绘制窗口背景：委托当前 UI 风格（玻璃风格为渐变底）
+    void paintEvent(QPaintEvent* pEvent) override;
     // 右键弹出菜单：仅当在"插入"菜单项上右键时，返回插入工具栏的显示切换菜单
     QMenu* createPopupMenu() override;
 

@@ -14,11 +14,13 @@
 #ifndef BWM_UI_UISTYLE_H
 #define BWM_UI_UISTYLE_H
 
+#include <QColor>
 #include <QString>
 #include <QVector>
 
 #include "plugin/IUiStyleProvider.h"
 
+class QPainter;
 class QWidget;
 
 namespace bwm {
@@ -34,13 +36,13 @@ namespace bwm {
 class UiStyleManager
 {
 public:
-    // 内置风格 id 常量
-    static const QString kSystemId;        ///< "system" —— 系统默认外观
-    static const QString kAcrylicDarkId;   ///< "acrylic-dark"
-    static const QString kAcrylicLightId;  ///< "acrylic-light"
+    // 内置界面外观 id 常量
+    static const QString kDarkId;    ///< "dark" —— 深色玻璃
+    static const QString kLightId;   ///< "light" —— 浅色玻璃
+    static const QString kAutoId;    ///< "auto" —— 跟随系统深浅色
 
     /**
-     * @brief 当前 UI 风格 id（持久化于 Settings，默认 acrylic-dark）。
+     * @brief 当前 UI 风格 id（持久化于 Settings，默认 auto 即跟随系统）。
      */
     static QString currentStyleId();
     static void setCurrentStyleId(const QString& rId);
@@ -71,16 +73,41 @@ public:
     /**
      * @brief 应用当前风格到主窗口。
      * @param pMainWindow  待应用风格的主窗口
-     * @return 是否成功；失败时自动回退到 "system" 并返回 false
+     * @return 是否成功；失败时自动回退到第一个可用风格并返回其应用结果
      *
      * 遍历所有已注册 Provider，找到能处理当前 styleId 的那个调用其 applyStyle。
-     * 若所有 Provider 都返回 false，则禁用所有原生效果（回退 system）。
+     * 若都返回 false（如 Provider 卸载、持久化值失效），则回退到第一个可用风格。
      */
     static bool applyCurrentStyle(QWidget* pMainWindow);
+
+    /**
+     * @brief 委托当前风格绘制窗口背景（如玻璃拟态的渐变底）。
+     *
+     * 由 MainWindow::paintEvent 调用。若当前风格未提供背景绘制（使用接口的默认
+     * 实现），返回 false，调用方应回退到 Qt 默认绘制。
+     *
+     * @param pMainWindow  主窗口
+     * @param rPainter     已绑定到主窗口的画笔
+     * @return true 表示背景已由风格绘制
+     */
+    static bool paintWindowBackground(QWidget* pMainWindow, QPainter& rPainter);
+
+    /**
+     * @brief 当前风格的画布区域背景色。
+     *
+     * 玻璃风格返回全透明色，让窗口渐变透上来到画布区域；
+     * 未提供该能力的风格返回无效 QColor()，调用方应保持画布默认背景。
+     *
+     * @return 有效颜色表示需应用到画布视口；无效表示不干预
+     */
+    static QColor canvasBackgroundColor();
 
 private:
     // 查找能处理指定 styleId 的 Provider 并调用 applyStyle
     static bool applyStyleById(const QString& rId, QWidget* pMainWindow);
+
+    // 查找提供指定 styleId 的 Provider（找不到返回 nullptr）
+    static const IUiStyleProvider* providerForStyle(const QString& rId);
 };
 
 } // namespace bwm

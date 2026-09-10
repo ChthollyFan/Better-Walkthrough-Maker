@@ -26,10 +26,16 @@ CanvasView::CanvasView(QGraphicsScene* pScene, QWidget* pParent)
     : QGraphicsView(pScene, pParent)
 {
     setRenderHint(QPainter::Antialiasing);
-    setBackgroundBrush(QColor(60, 60, 60));
+    setBackgroundBrush(defaultBackgroundColor());
     setDragMode(QGraphicsView::RubberBandDrag);
     setTransformationAnchor(QGraphicsView::NoAnchor);
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
+}
+
+QColor CanvasView::defaultBackgroundColor()
+{
+    // 中性深灰：无 UI 风格干预时画布视口的本色
+    return QColor(60, 60, 60);
 }
 
 void CanvasView::wheelEvent(QWheelEvent* pEvent)

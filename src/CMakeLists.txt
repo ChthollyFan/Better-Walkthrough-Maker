@@ -19,7 +19,7 @@ add_library(bwm_core STATIC
   theme/Theme.cpp
   # UI 外观层（窗口/控件风格）
   ui/AcrylicHelper.cpp
-  ui/AcrylicStyleProvider.cpp
+  ui/GlassStyleProvider.cpp
   ui/UiStyle.cpp
   # 插件接口与宿主
   plugin/PluginHost.cpp
