@@ -53,10 +53,12 @@ public:
      * @param nP          页面索引
      * @param rBackground 背景色
      * @param dScale      渲染倍率
+     * @param strProjectDirectory 项目目录（解析页面背景图相对路径用，可为空）
      * @return            渲染结果（失败返回空 QImage）
      */
     static QImage renderPageRef(const Project& rProject, int nW, int nP,
-                                 const QColor& rBackground, qreal dScale = 1.0);
+                                 const QColor& rBackground, qreal dScale = 1.0,
+                                 const QString& strProjectDirectory = QString());
 
     /**
      * @brief 净化文件名：把非法字符替换为下划线。

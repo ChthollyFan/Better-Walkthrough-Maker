@@ -211,6 +211,11 @@ void MainWindow::createMenus()
     QAction* pAddPageAction = pWalkthroughMenu->addAction(QStringLiteral("新建页面(&P)"));
     connect(pAddPageAction, &QAction::triggered,
             m_pTreePanel, &ProjectTreePanel::onAddPage);
+    // 从图片新建页面：页面尺寸取图片原始尺寸，图片作为整页背景图
+    QAction* pAddPageFromImageAction =
+        pWalkthroughMenu->addAction(QStringLiteral("从图片新建页面(&I)…"));
+    connect(pAddPageFromImageAction, &QAction::triggered,
+            m_pTreePanel, &ProjectTreePanel::onAddPageFromImage);
     pWalkthroughMenu->addSeparator();
     QAction* pRenameNodeAction = pWalkthroughMenu->addAction(QStringLiteral("重命名(&R)…"));
     connect(pRenameNodeAction, &QAction::triggered,
@@ -503,6 +508,9 @@ void MainWindow::createCentralWidget()
     m_pAssetPanel = new AssetPanel(m_pTabPanel, m_pProjectManager);
     connect(m_pAssetPanel, &AssetPanel::assetInserted,
             this, &MainWindow::onAssetInserted);
+    // 项目树导入图片（从图片新建页面 / 设置背景图）后，素材库需要刷新以显示新素材
+    connect(m_pTreePanel, &ProjectTreePanel::assetsChanged,
+            m_pAssetPanel, &AssetPanel::refreshAssetList);
     m_pTabPanel->addTab(m_pAssetPanel, QStringLiteral("素材库"));
 
     // 图层面板
@@ -669,7 +677,9 @@ void MainWindow::onCopyPageToClipboard()
         return;
     }
     const QImage image = ExportRenderer::renderPage(*pPage, 2.0,
-                                                    ThemeManager::currentTheme().backgroundColor);
+                                                    ThemeManager::currentTheme().backgroundColor,
+                                                    QString(),
+                                                    m_pProjectManager->projectDirectory());
     QApplication::clipboard()->setImage(image);
     statusBar()->showMessage(QStringLiteral("当前页已复制到剪贴板（2x），可直接粘贴到小黑盒"), 4000);
 }
@@ -819,6 +829,8 @@ void MainWindow::updateCanvasEditor()
         return;
     }
     m_bSyncingCanvas = true;
+    // 先告知画布项目目录：页面背景图的相对路径需要它来解析
+    m_pScene->setProjectDirectory(m_pProjectManager->projectDirectory());
     m_pScene->loadPage(*pPage);
     m_bSyncingCanvas = false;
     m_pView->fitInView(m_pScene->sceneRect(), Qt::KeepAspectRatio);

@@ -36,6 +36,10 @@ QJsonObject pageToJson(const Page& rPage)
     pageObject.insert(QStringLiteral("name"), rPage.strName);
     pageObject.insert(QStringLiteral("width"), rPage.size.width());
     pageObject.insert(QStringLiteral("height"), rPage.size.height());
+    // 背景图随页面一起进模板（相对项目路径）；空值不写入，与 project.json 保持一致
+    if (!rPage.strBackgroundImage.isEmpty()) {
+        pageObject.insert(QStringLiteral("backgroundImage"), rPage.strBackgroundImage);
+    }
     QJsonArray componentsArray;
     for (const Component& rComponent : rPage.vecComponents) {
         componentsArray.append(ComponentSerializer::toJson(rComponent));
@@ -49,6 +53,8 @@ Page pageFromJson(const QJsonObject& rPageObject)
     Page page;
     page.strName = rPageObject.value(QStringLiteral("name")).toString(QStringLiteral("页面"));
     page.size = parsePageSize(rPageObject);
+    // 背景图：旧模板无该字段时为空字符串（向后兼容）
+    page.strBackgroundImage = rPageObject.value(QStringLiteral("backgroundImage")).toString();
     const QJsonValue componentsValue = rPageObject.value(QStringLiteral("components"));
     if (componentsValue.isArray()) {
         const QJsonArray componentsArray = componentsValue.toArray();

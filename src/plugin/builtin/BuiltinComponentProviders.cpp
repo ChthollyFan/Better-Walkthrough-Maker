@@ -9,14 +9,12 @@
  */
 #include "plugin/builtin/BuiltinComponentProviders.h"
 
+#include "project/AssetStore.h"
 #include "settings/Settings.h"
 
-#include <QDir>
 #include <QFileDialog>
-#include <QFileInfo>
 #include <QInputDialog>
 #include <QLineEdit>
-#include <QUuid>
 
 namespace bwm {
 
@@ -64,24 +62,13 @@ bool ImageComponentProvider::showInputDialog(QWidget* pParent, Component& rCompo
         return false;   // 用户取消
     }
 
-    QString strAssetPath = strFilePath;
-    // 优先复制进项目 assets/（自包含；有项目时才复制）
-    if(!rContext.projectDirectory.isEmpty()) {
-        const QString strAssetsDir = rContext.projectDirectory + QStringLiteral("/assets");
-        QDir dir(strAssetsDir);
-        if(!dir.exists()) {
-            dir.mkpath(QStringLiteral("."));
-        }
-        const QFileInfo info(strFilePath);
-        const QString strTarget = dir.filePath(
-            QUuid::createUuid().toString(QUuid::WithoutBraces)
-            + QLatin1Char('.') + info.suffix());
-        if(QFile::copy(strFilePath, strTarget)) {
-            strAssetPath = strTarget;
-        }
-    }
-
-    rComponent.imageData.strFilePath = strAssetPath;
+    // 复制进项目 assets/（保证项目自包含）；未打开项目或复制失败时退回直接引用源文件。
+    // 复制逻辑统一走 AssetStore，与页面背景图导入共用同一实现。
+    QString strErrorMessage;
+    const QString strImportedPath = AssetStore::importImage(strFilePath,
+                                                            rContext.projectDirectory,
+                                                            &strErrorMessage);
+    rComponent.imageData.strFilePath = strImportedPath.isEmpty() ? strFilePath : strImportedPath;
     return true;
 }
 

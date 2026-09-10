@@ -201,7 +201,8 @@ QImage MarkdownPreview::renderPageRef(int nWalkthroughIndex, int nPageIndex)
     }
     // 用 0.5 倍率渲染，避免预览中页面图片过大
     return ExportRenderer::renderPage(rWalkthrough.vecPages.at(nPageIndex),
-                                      0.5, m_backgroundColor);
+                                      0.5, m_backgroundColor, QString(),
+                                      m_strProjectDirectory);
 }
 
 } // namespace bwm

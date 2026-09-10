@@ -81,7 +81,8 @@ QTextDocument* ArticleRenderer::buildDocument(const Article& rArticle,
     // 第三步：注册页面引用图片 resource
     for(const auto& rRef : vecPageRefs) {
         const QImage image = renderPageRef(rProject, rRef.first, rRef.second,
-                                           rContext.theme.backgroundColor);
+                                           rContext.theme.backgroundColor, 1.0,
+                                           rContext.projectDirectory);
         if(!image.isNull()) {
             const QUrl resourceUrl(QStringLiteral("bwm://page/%1/%2")
                                        .arg(rRef.first).arg(rRef.second));
@@ -159,7 +160,8 @@ QTextDocument* ArticleRenderer::buildDocument(const Article& rArticle,
 }
 
 QImage ArticleRenderer::renderPageRef(const Project& rProject, int nW, int nP,
-                                       const QColor& rBackground, qreal dScale)
+                                       const QColor& rBackground, qreal dScale,
+                                       const QString& strProjectDirectory)
 {
     if(nW < 0 || nW >= rProject.vecWalkthroughs.size()) {
         return QImage();
@@ -168,7 +170,9 @@ QImage ArticleRenderer::renderPageRef(const Project& rProject, int nW, int nP,
     if(nP < 0 || nP >= rWalkthrough.vecPages.size()) {
         return QImage();
     }
-    return ExportRenderer::renderPage(rWalkthrough.vecPages.at(nP), dScale, rBackground);
+    // 传入项目目录：页面带背景图时按相对路径解析（否则背景图会缺失）
+    return ExportRenderer::renderPage(rWalkthrough.vecPages.at(nP), dScale, rBackground,
+                                      QString(), strProjectDirectory);
 }
 
 QString ArticleRenderer::sanitizeFileName(const QString& strName)

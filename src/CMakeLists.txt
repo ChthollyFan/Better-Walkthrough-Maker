@@ -5,6 +5,7 @@ add_library(bwm_core STATIC
   core/Component.cpp
   core/ComponentPainter.cpp
   core/ComponentSerializer.cpp
+  core/PageBackground.cpp
   core/Project.cpp
   core/ProjectSerializer.cpp
   core/Template.cpp
@@ -12,6 +13,7 @@ add_library(bwm_core STATIC
   export/ArticleRenderer.cpp
   export/ExportRenderer.cpp
   export/ExportResultHelper.cpp
+  project/AssetStore.cpp
   project/ProjectManager.cpp
   settings/Settings.cpp
   template/BuiltinTemplates.cpp

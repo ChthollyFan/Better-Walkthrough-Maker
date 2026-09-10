@@ -95,7 +95,8 @@ int ArticleMarkdownExportProvider::exportArticle(const Article& rArticle,
         const int nP = rMatch.captured(2).toInt();
         // 渲染页面为图片
         const QImage image = ArticleRenderer::renderPageRef(
-            rProject, nW, nP, rContext.theme.backgroundColor, 1.0);
+            rProject, nW, nP, rContext.theme.backgroundColor, 1.0,
+            rContext.projectDirectory);
         if(image.isNull()) {
             continue;
         }

@@ -66,6 +66,10 @@ QJsonObject walkthroughToJson(const Walkthrough& rWalkthrough)
         pageObject.insert(QStringLiteral("name"), rPage.strName);
         pageObject.insert(QStringLiteral("width"), rPage.size.width());
         pageObject.insert(QStringLiteral("height"), rPage.size.height());
+        // 背景图为可选字段：空（无背景图）时不写入，保持 JSON 精简且向后兼容
+        if (!rPage.strBackgroundImage.isEmpty()) {
+            pageObject.insert(QStringLiteral("backgroundImage"), rPage.strBackgroundImage);
+        }
         QJsonArray componentsArray;
         for (const Component& rComponent : rPage.vecComponents) {
             componentsArray.append(ComponentSerializer::toJson(rComponent));
@@ -105,6 +109,8 @@ Walkthrough walkthroughFromJson(const QJsonObject& rWalkthroughObject)
             Page page;
             page.strName = pageObject.value(QStringLiteral("name")).toString(QStringLiteral("未命名页面"));
             page.size = parsePageSize(pageObject);
+            // 背景图：旧文件无该字段时为空字符串（向后兼容）
+            page.strBackgroundImage = pageObject.value(QStringLiteral("backgroundImage")).toString();
             // 组件列表：旧文件无 components 字段时为空列表（向后兼容）
             const QJsonValue componentsValue = pageObject.value(QStringLiteral("components"));
             if (componentsValue.isArray()) {

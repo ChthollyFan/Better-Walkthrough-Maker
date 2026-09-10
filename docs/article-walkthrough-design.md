@@ -212,6 +212,7 @@ static QTextDocument* buildDocument(const Article& rArticle, const Project& rPro
 | `src/plugin/IExportProvider.h` | `supportsArticle` / `exportArticle` |
 | `src/plugin/builtin/BuiltinPluginRegistrar.cpp` | 注册三个文章导出 Provider |
 | `src/plugin/builtin/BuiltinExportProviders.cpp` | 改用共享 `showExportResult` |
+| `src/export/ArticleRenderer.h/.cpp` | `renderPageRef` 增加项目目录参数（供页面背景图解析相对路径，见 project-plan 8.1 页面背景图记录） |
 | `CMakeLists.txt` / `src/CMakeLists.txt` / `tests/CMakeLists.txt` | 新源文件 + PrintSupport 依赖 |
 
 ## 八、测试覆盖

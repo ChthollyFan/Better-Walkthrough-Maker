@@ -5,6 +5,8 @@
  */
 #include <QtTest>
 
+#include <QDir>
+#include <QImage>
 #include <QTemporaryDir>
 
 #include "core/Project.h"
@@ -26,6 +28,8 @@ private slots:
     void testRenderLongImageEmpty();
     // PNG 写入文件成功
     void testWritePng();
+    // 页面背景图：传入项目目录时铺满整页，未传时保留背景色；长图同样生效
+    void testRenderPageWithBackgroundImage();
 };
 
 // 构造一个含形状与文本组件的页面
@@ -120,6 +124,38 @@ void TestExportRenderer::testWritePng()
     // 写入失败路径（目录不存在）
     QVERIFY(!ExportRenderer::writePng(image, tempDir.path() + QStringLiteral("/不存在/xx.png"),
                                       &strErrorMessage));
+}
+
+void TestExportRenderer::testRenderPageWithBackgroundImage()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    // 准备项目内素材：assets/bg.png（纯蓝 40x20）
+    QVERIFY(QDir(tempDir.path()).mkpath(QStringLiteral("assets")));
+    QImage background(40, 20, QImage::Format_ARGB32);
+    background.fill(QColor(0, 0, 255));
+    QVERIFY(background.save(tempDir.filePath(QStringLiteral("assets/bg.png")), "PNG"));
+
+    Page page = makeSamplePage();
+    page.size = QSize(40, 20);
+    page.vecComponents.clear();   // 只验证背景图绘制
+    page.strBackgroundImage = QStringLiteral("assets/bg.png");
+
+    // 传入项目目录：相对路径被解析，背景图铺满整页（页面尺寸 = 图片尺寸）
+    const QImage image = ExportRenderer::renderPage(page, 1.0, Qt::white, QString(), tempDir.path());
+    QCOMPARE(image.size(), QSize(40, 20));
+    QCOMPARE(image.pixelColor(5, 5), QColor(0, 0, 255));
+
+    // 不传项目目录：相对路径无法解析，保留下主题背景色（不崩溃、不绘制）
+    const QImage noDirImage = ExportRenderer::renderPage(page, 1.0, Qt::white);
+    QCOMPARE(noDirImage.pixelColor(5, 5), QColor(Qt::white));
+
+    // 长图渲染同样带上背景图
+    QString strErrorMessage;
+    const QImage longImage = ExportRenderer::renderLongImage({page}, 1.0, false, &strErrorMessage,
+                                                             Qt::white, QString(), tempDir.path());
+    QVERIFY(!longImage.isNull());
+    QCOMPARE(longImage.pixelColor(5, 5), QColor(0, 0, 255));
 }
 
 // 文本渲染需要 QGuiApplication（字体数据库），因此用 QTEST_MAIN

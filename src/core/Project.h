@@ -35,6 +35,11 @@ struct Page {
     QString strName;                   // 页面名
     QSize size;                        // 逻辑像素尺寸；导出时按倍率缩放
     QVector<Component> vecComponents;  // 页面组件列表（M2 画布阶段加入）
+    // 页面背景图：存**相对项目根目录**的路径（如 "assets/xxx.png"），空表示无背景图。
+    // 用相对路径而非绝对路径，保证项目文件夹整体移动/拷贝后背景图仍然有效；
+    // 渲染时由调用方传入项目目录，经 AssetStore::resolvePath() 解析为绝对路径。
+    // 绘制方式为「等比覆盖、超出裁剪」（见 core/PageBackground.h），铺满整页且不变形。
+    QString strBackgroundImage;
 };
 
 // 攻略：项目下的一个攻略，绑定一个类型（对应模板分类）。

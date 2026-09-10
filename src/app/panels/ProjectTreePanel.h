@@ -34,6 +34,8 @@ class PluginHost;
  * 显示项目的树形结构，支持：
  * - 选中页面节点 → 发出 pageSelected 信号通知 MainWindow 加载画布
  * - 右键菜单 → 新建/重命名/删除攻略与页面
+ * - 从图片新建页面 → 页面尺寸取图片原始尺寸，图片复制进 assets/ 并作为整页背景图
+ * - 页面背景图 → 设置（可选同步页面尺寸）/ 清除
  * - 模板操作 → 保存为模板/导入模板/导出模板
  * - 结构变更 → 发出 projectStructureChanged 信号通知 MainWindow 刷新
  */
@@ -105,6 +107,11 @@ public slots:
     // 攻略/页面管理
     void onAddWalkthrough();
     void onAddPage();
+    // 从图片新建页面：以图片原始像素尺寸建页，并把图片作为整页背景图
+    void onAddPageFromImage();
+    // 页面背景图：设置（选图并可同步页面尺寸）/ 清除
+    void onSetPageBackground();
+    void onClearPageBackground();
     void onAddArticle();
     void onImportArticle();
     void onRenameNode();
@@ -115,6 +122,9 @@ public slots:
     void onExportTemplate();
 
 private:
+    /// 按键（"W:P"）取页面指针；非页面键或索引越界返回 nullptr
+    Page* pageByKey(const QString& strKey);
+
     ProjectManager* m_pProjectManager;   ///< 项目管理器
     PluginHost* m_pHost;                 ///< 插件宿主
     QTreeWidget* m_pTree;                ///< 项目树控件

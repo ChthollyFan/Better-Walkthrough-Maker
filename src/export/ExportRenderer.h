@@ -17,14 +17,18 @@ namespace bwm {
 class ExportRenderer {
 public:
     // 渲染单页（dScale 为倍率；rBackground 为页面背景色，跟随主题；
-    // rAuthor 非空时在右下角标注 by 作者名）
+    // rAuthor 非空时在右下角标注 by 作者名；
+    // rProjectDirectory 非空时用于把页面背景图的相对路径解析为绝对路径）
     static QImage renderPage(const Page& rPage, qreal dScale,
                              const QColor& rBackground = Qt::white,
-                             const QString& rAuthor = QString());
+                             const QString& rAuthor = QString(),
+                             const QString& rProjectDirectory = QString());
     // 渲染多页为长图：纵向拼接，bSeparator 时页间绘制分隔线
+    // （rProjectDirectory 含义同 renderPage）
     static QImage renderLongImage(const QVector<Page>& rPages, qreal dScale, bool bSeparator,
                                   QString* pErrorMessage, const QColor& rBackground = Qt::white,
-                                  const QString& rAuthor = QString());
+                                  const QString& rAuthor = QString(),
+                                  const QString& rProjectDirectory = QString());
     // 写 PNG 文件；失败时返回 false 并给出原因
     static bool writePng(const QImage& rImage, const QString& strFilePath, QString* pErrorMessage);
 

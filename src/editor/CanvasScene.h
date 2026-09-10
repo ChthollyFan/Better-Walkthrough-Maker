@@ -27,6 +27,8 @@ public:
     void clearPage();
     // 页面背景色（跟随主题）
     void setPageBackgroundColor(const QColor& rColor);
+    // 项目目录：用于把页面背景图的相对路径解析为绝对路径（切换项目时更新）
+    void setProjectDirectory(const QString& strDir);
     QColor pageBackgroundColor() const { return m_pageBackgroundColor; }
     // 将场景内全部组件写回页面模型（按 zOrder 排序）
     void syncToModel(Page* pPage);
@@ -70,6 +72,7 @@ private:
     bool m_bSnapToGuides = true;          // 对齐参考线吸附开关
     int m_nGridSize = 10;                 // 网格间距（逻辑像素）
     QColor m_pageBackgroundColor = Qt::white;   // 页面背景色（跟随主题）
+    QString m_strProjectDirectory;              // 项目目录（解析背景图相对路径）
 };
 
 } // namespace bwm

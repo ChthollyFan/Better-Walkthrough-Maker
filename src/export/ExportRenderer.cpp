@@ -5,11 +5,14 @@
  */
 #include "export/ExportRenderer.h"
 
+#include <QImage>
 #include <QPainter>
 
 #include <algorithm>
 
 #include "core/ComponentPainter.h"
+#include "core/PageBackground.h"
+#include "project/AssetStore.h"
 
 namespace bwm {
 
@@ -30,6 +33,24 @@ QVector<Component> sortedComponents(const QVector<Component>& rComponents)
                   return rLeft.nZOrder < rRight.nZOrder;
               });
     return sorted;
+}
+
+// 绘制页面背景图（等比覆盖铺满整页）；dOffsetY 为长图拼接时的纵向偏移。
+// 页面无背景图或图片加载失败时不绘制，保留已填充的主题背景色。
+void paintPageBackground(QPainter* pPainter, const Page& rPage, qreal dOffsetY,
+                         const QString& rProjectDirectory)
+{
+    if (rPage.strBackgroundImage.isEmpty()) {
+        return;
+    }
+    const QString strImagePath = AssetStore::resolvePath(rPage.strBackgroundImage,
+                                                         rProjectDirectory);
+    const QImage image(strImagePath);
+    if (image.isNull()) {
+        return;
+    }
+    PageBackground::paintCover(pPainter, image,
+                               QRectF(0, dOffsetY, rPage.size.width(), rPage.size.height()));
 }
 
 // 在指定原点绘制一页的全部组件（y 偏移用于长图拼接）
@@ -70,7 +91,7 @@ void ExportRenderer::drawAuthorMark(QImage& rImage, const QString& rAuthor, qrea
 }
 
 QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor& rBackground,
-                                  const QString& rAuthor)
+                                  const QString& rAuthor, const QString& rProjectDirectory)
 {
     const int nWidth = qMax(1, qRound(rPage.size.width() * dScale));
     const int nHeight = qMax(1, qRound(rPage.size.height() * dScale));
@@ -81,6 +102,8 @@ QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor&
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
     painter.scale(dScale, dScale);
+    // 先铺页面背景图，再画组件（与画布层序一致：背景图在最底）
+    paintPageBackground(&painter, rPage, 0, rProjectDirectory);
     paintPageComponents(&painter, rPage, 0);
     painter.end();
 
@@ -90,7 +113,7 @@ QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor&
 
 QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale, bool bSeparator,
                                        QString* pErrorMessage, const QColor& rBackground,
-                                       const QString& rAuthor)
+                                       const QString& rAuthor, const QString& rProjectDirectory)
 {
     if (rPages.isEmpty()) {
         return QImage();
@@ -129,6 +152,7 @@ QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale
         const Page& rPage = rPages.at(nIndex);
         // 页面背景（宽度不足最大宽时补背景色）
         painter.fillRect(QRectF(0, dOffsetY, nWidth, rPage.size.height()), rBackground);
+        paintPageBackground(&painter, rPage, dOffsetY, rProjectDirectory);
         paintPageComponents(&painter, rPage, dOffsetY);
         dOffsetY += rPage.size.height();
         if (bSeparator && nIndex < rPages.size() - 1) {
