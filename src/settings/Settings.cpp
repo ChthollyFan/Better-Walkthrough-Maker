@@ -72,7 +72,7 @@ void Settings::setRecentProjects(const QStringList& vecPaths)
 
 QString Settings::themeName()
 {
-    return settings().value(QStringLiteral("theme"), QStringLiteral("浅色简洁风")).toString();
+    return settings().value(QStringLiteral("theme"), QStringLiteral("浅色页面")).toString();
 }
 
 void Settings::setThemeName(const QString& rName)

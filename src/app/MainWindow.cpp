@@ -296,13 +296,22 @@ void MainWindow::createMenus()
     pSnapGuidesAction->setChecked(m_pScene->snapToGuides());
     connect(pSnapGuidesAction, &QAction::toggled, this, &MainWindow::onToggleSnapToGuides);
 
-    // ---- 主题菜单（从 PluginHost 动态构建）----
+    // ---- 主题菜单 ----
     QMenu* pThemeMenu = menuBar()->addMenu(QStringLiteral("主题(&T)"));
-    auto* pThemeGroup = new QActionGroup(this);
-    const QString strCurrentTheme = ThemeManager::currentThemeName();
-    // 遍历所有主题 Provider，合并主题列表
+
+    // 画布配色：合并所有主题 Provider 提供的主题。
+    // 当前仅内置「浅色页面」一种，此时不渲染该分组（单项单选没有意义）；
+    // 若将来新增画布主题，分组会自动出现。
+    QVector<Theme> vecCanvasThemes;
     for(const IThemeProvider* pProvider : m_pHost->themeProviders()) {
-        for(const Theme& rTheme : pProvider->themes()) {
+        vecCanvasThemes.append(pProvider->themes());
+    }
+    const bool bShowCanvasGroup = (vecCanvasThemes.size() > 1);
+    if(bShowCanvasGroup) {
+        pThemeMenu->addSection(QStringLiteral("画布配色"));
+        auto* pThemeGroup = new QActionGroup(this);
+        const QString strCurrentTheme = ThemeManager::currentThemeName();
+        for(const Theme& rTheme : vecCanvasThemes) {
             QAction* pThemeAction = pThemeMenu->addAction(rTheme.strName);
             pThemeAction->setCheckable(true);
             pThemeAction->setData(rTheme.strName);
@@ -311,14 +320,17 @@ void MainWindow::createMenus()
             }
             pThemeGroup->addAction(pThemeAction);
         }
+        connect(pThemeGroup, &QActionGroup::triggered, this, [this](QAction* pAction) {
+            ThemeManager::setCurrentThemeName(pAction->data().toString());
+            applyTheme();
+        });
     }
-    connect(pThemeGroup, &QActionGroup::triggered, this, [this](QAction* pAction) {
-        ThemeManager::setCurrentThemeName(pAction->data().toString());
-        applyTheme();
-    });
 
-    // ---- 界面外观分组（UI 风格，与画布配色独立）----
-    pThemeMenu->addSection(QStringLiteral("界面外观"));
+    // ---- 界面外观（与画布配色独立）----
+    // 仅当画布配色分组同时存在时才加分区标题，避免菜单里出现多余的分节文字
+    if(bShowCanvasGroup) {
+        pThemeMenu->addSection(QStringLiteral("界面外观"));
+    }
     auto* pUiStyleGroup = new QActionGroup(this);
     const QString strCurrentUiStyle = UiStyleManager::currentStyleId();
     for(const UiStyleDescriptor& rDesc : UiStyleManager::availableStyles()) {

@@ -1,7 +1,7 @@
 /**
  * @file Theme.cpp
  * @author zhangweimu
- * @brief 主题包实现：内置两套配色（深色游戏风 / 浅色简洁风）。
+ * @brief 主题包实现：内置画布配色主题表。
  */
 #include "theme/Theme.h"
 
@@ -11,17 +11,11 @@ namespace bwm {
 
 namespace {
 
-// 内置主题表
+// 内置主题表：目前仅保留「浅色页面」一种画布配色。
+// 界面深浅色由 UI 外观（ui/UiStyle.h）负责，与画布配色相互独立。
 const QVector<Theme> kBuiltinThemes = {
     {
-        QStringLiteral("深色游戏风"),
-        QColor(230, 57, 70),        // 主色：高饱和红
-        QColor(69, 123, 157),       // 辅色：蓝
-        QColor(30, 30, 46),         // 背景：深蓝灰
-        QColor(237, 237, 237),      // 文字：近白
-    },
-    {
-        QStringLiteral("浅色简洁风"),
+        QStringLiteral("浅色页面"),
         QColor(29, 53, 87),         // 主色：深蓝
         QColor(69, 123, 157),       // 辅色：蓝
         QColor(255, 255, 255),      // 背景：白

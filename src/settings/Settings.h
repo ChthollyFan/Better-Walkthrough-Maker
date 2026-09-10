@@ -34,7 +34,7 @@ public:
     static QStringList recentProjects();
     static void setRecentProjects(const QStringList& vecPaths);
 
-    // 当前主题名（内置主题见 theme/Theme.h）
+    // 当前画布配色主题名（内置主题见 theme/Theme.h）
     static QString themeName();
     static void setThemeName(const QString& rName);
 
