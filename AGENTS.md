@@ -130,8 +130,29 @@ pwsh -File package_single.ps1   # 生成 BWM.exe（单文件，免安装、无�
 > 说明：本流程**仅在用户明确提出发布要求时执行**，日常开发中不执行。
 > 本项目适配：第五步打 tag 并推送后，GitHub Actions（`.github/workflows/release.yml`）会自动完成
 > 构建 → 测试 → 部署 Qt 运行时 → 用 Enigma Virtual Box 打包，并发布到 GitHub Releases。
+> 其中 Release 页面说明由 CI 从 `CHANGELOG.md` 抽取对应版本段落生成（列出新增功能与修复的 Bug）。
 > **发布产物只有一个：单文件 `BWM.exe`**（免安装、无需 Qt DLL）。
 > 故第六节"部署"中的手动服务器部署对本项目不适用（无服务器，改为验证 Release 产物）。
+
+---
+
+### 零、发布注意事项（实测踩坑，发布前必读）
+
+1. **版本号只有一个来源**：只改顶层 `CMakeLists.txt` 的 `project(VERSION)`，主程序经 `BWM_VERSION`
+   宏读取（`main.cpp`、`deploy.ps1` 中的同值仅作脱离 CMake 时的回退），不要在新地方再写死版本号。
+   **tag 名必须与之一致**：`VERSION 0.4.0` ↔ `git tag v0.4.0`。
+2. **不要复用已发布过的版本号**：若 dev 分支内容已领先上一个 tag，必须递增版本号。
+   同号会导致「关于」对话框显示的版本与 Release 页面对不上，用户报障时无法定位具体构建。
+3. **打包前关闭正在运行的 `BWM.exe` / `bwm.exe`**：`package_single.ps1` 用 `Remove-Item` 覆盖根目录
+   `BWM.exe`，文件被运行中的程序占用会中断打包（报 `being used by another process`）。
+4. **打包顺序不可颠倒**：先 `pwsh -File package.ps1`（windeployqt 部署出 `release/` 目录），
+   再 `pwsh -File package_single.ps1`（Enigma Virtual Box 打包出根目录 `BWM.exe`）。
+   直接跑后者会因缺少 `release/bwm.exe` 而前置条件检查失败。
+5. **CHANGELOG 先行**：打 tag 前把 `## [未发布]` 改写为 `## [x.y.z] - YYYY-MM-DD`（内容即新增功能与
+   修复的 Bug），并保证 **CHANGELOG 段落 = tag 正文 = Release 页面说明** 三者一致。
+   CI 按 tag 版本号从 `CHANGELOG.md` 抽取该段落作为 Release 正文，版本号写错会抽不到（只能回退到
+   自动生成的 commit 列表）。
+6. **产物只有一个**：单文件 `BWM.exe`；发布前**复制到空目录**（确保周围无 Qt DLL）双击验证可独立启动。
 
 ---
 
@@ -270,6 +291,12 @@ pwsh -File package_single.ps1   # 生成 BWM.exe（单文件，免安装、无�
    ```
    git push origin main --tags
    ```
+4. **Release 说明（新增功能 / 修复的 Bug）**：推送 tag 后 GitHub Actions 会自动创建 Release，
+   并**从 `CHANGELOG.md` 抽取与 tag 版本号对应的段落作为 Release 正文**（即 Added / Fixed / Changed
+   等分类内容），自动生成的 commit 列表追加其后。因此：
+   - 打 tag 前 CHANGELOG.md 必须已把 `## [未发布]` 改写为 `## [x.y.z] - YYYY-MM-DD`；
+   - `x.y.z` 必须与 tag 名（去掉 `v`）完全一致，否则抽不到段落，Release 页只剩自动 commit 列表；
+   - Actions 跑完后到 Release 页面核对一次说明是否完整（见「零、发布注意事项」第 5 条）。
 
 ---
 
@@ -283,10 +310,11 @@ pwsh -File package_single.ps1   # 生成 BWM.exe（单文件，免安装、无�
 > 本项目适配：GitHub Actions 自动构建并发布 Release，**本步改为验证单文件 `BWM.exe`**：
 >
 > 1. 在 Actions 页面确认工作流成功（编译、测试、打包全绿）。
-> 2. 从 Release 页面下载 `BWM.exe`。
-> 3. **复制到空目录**（确保目录内无 Qt DLL）后双击运行，确认能正常启动。
-> 4. 冒烟测试核心功能：新建项目 → 插入组件 → 导出 PNG；新建文章 → 编辑 → 导出。
-> 5. 本地预验证（可选）：`pwsh -File package_single.ps1` 生成 `BWM.exe` 后同样做空目录测试。
+> 2. 查看 Release 页面说明是否已列出**新增功能 / 修复的 Bug**（CI 从 CHANGELOG 抽取，抽不到需手工补写）。
+> 3. 从 Release 页面下载 `BWM.exe`。
+> 4. **复制到空目录**（确保目录内无 Qt DLL）后双击运行，确认能正常启动。
+> 5. 冒烟测试核心功能：新建项目 → 插入组件 → 导出 PNG；新建文章 → 编辑 → 导出。
+> 6. 本地预验证（可选）：`pwsh -File package_single.ps1` 生成 `BWM.exe` 后同样做空目录测试。
 
 ---
 
@@ -332,12 +360,14 @@ pwsh -File package_single.ps1   # 生成 BWM.exe（单文件，免安装、无�
 发布前逐项确认：
 
 - [ ] 本地所有测试通过
-- [ ] CHANGELOG.md 已更新并提交
+- [ ] CHANGELOG.md 已更新并提交（`## [未发布]` 已改写为 `## [x.y.z] - 日期`）
 - [ ] 文档（README、配置）已同步更新
-- [ ] 版本号符合语义化版本规范
+- [ ] 版本号符合语义化版本规范，且顶层 `CMakeLists.txt` 的 VERSION 与 tag 名一致、未复用已发布版本号
 - [ ] Tag 正文包含完整的变更分类、升级影响、已知问题
 - [ ] Tag 正文内容与 CHANGELOG.md 对应条目一致
 - [ ] main 分支已包含所有待发布代码
+- [ ] 打包前已关闭正在运行的 `BWM.exe` / `bwm.exe`（否则覆盖产物失败）
 - [ ] 远程推送成功（`git push --tags`）
+- [ ] Release 页面说明已列出新增功能与修复的 Bug（CI 自动取 CHANGELOG 段落，抽不到时手工补写）
 - [ ] 单文件 `BWM.exe` 已在空目录验证可独立运行（无 Qt DLL 依赖）
 
