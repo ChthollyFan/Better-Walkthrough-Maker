@@ -8,11 +8,12 @@
  */
 #include "app/panels/AssetPanel.h"
 
+#include "project/AssetStore.h"
 #include "project/ProjectManager.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
-#include <QFileInfo>
 #include <QImage>
 #include <QListWidget>
 #include <QListWidgetItem>
@@ -21,10 +22,20 @@
 #include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
-#include <QUuid>
 #include <QVBoxLayout>
 
 namespace bwm {
+
+namespace {
+
+// 判断两个路径是否指向同一个文件（忽略分隔符与大小写差异，Windows 盘符大小写不敏感）
+bool isSameFile(const QString& strLeft, const QString& strRight)
+{
+    return QDir::cleanPath(strLeft).compare(QDir::cleanPath(strRight),
+                                            Qt::CaseInsensitive) == 0;
+}
+
+} // namespace
 
 AssetPanel::AssetPanel(QWidget* pParent, ProjectManager* pProjectManager)
     : QWidget(pParent)
@@ -89,16 +100,10 @@ void AssetPanel::onImportAssets()
     if(files.isEmpty()) {
         return;
     }
-    const QString strAssetsDir = m_pProjectManager->projectDirectory() + QStringLiteral("/assets");
-    QDir dir(strAssetsDir);
-    if(!dir.exists()) {
-        dir.mkpath(QStringLiteral("."));
-    }
+    // 复制逻辑统一走 AssetStore（与图片组件、页面背景图导入共用）
+    const QString strProjectDir = m_pProjectManager->projectDirectory();
     for(const QString& strSource : files) {
-        const QFileInfo info(strSource);
-        const QString strTarget = dir.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces)
-                                               + QLatin1Char('.') + info.suffix());
-        QFile::copy(strSource, strTarget);
+        AssetStore::importImage(strSource, strProjectDir, nullptr);
     }
     refreshAssetList();
     emit assetsChanged();
@@ -138,25 +143,48 @@ void AssetPanel::onAssetContextMenu(const QPoint& rPos)
         onAssetDoubleClicked(pItem);
     } else if(pChosen == pDeleteAction) {
         const QString strPath = pItem->data(Qt::UserRole).toString();
-        // 引用检查：若任一页面的图片组件引用该素材，禁止删除
+        // 引用检查：若任一页面的图片组件或**页面背景图**引用该素材，禁止删除
+        // （背景图存的是项目内相对路径，需先解析为绝对路径再比对）
         bool bInUse = false;
         const Project* pProject = m_pProjectManager->project();
         if(pProject) {
+            const QString strProjectDir = m_pProjectManager->projectDirectory();
             for(const Walkthrough& rWalkthrough : pProject->vecWalkthroughs) {
                 for(const Page& rPage : rWalkthrough.vecPages) {
+                    if(!rPage.strBackgroundImage.isEmpty()
+                       && isSameFile(AssetStore::resolvePath(rPage.strBackgroundImage, strProjectDir),
+                                     strPath)) {
+                        bInUse = true;
+                        break;
+                    }
                     for(const Component& rComponent : rPage.vecComponents) {
                         if(rComponent.eType == E_COMPONENT_TYPE_IMAGE
-                           && rComponent.imageData.strFilePath == strPath) {
+                           && isSameFile(rComponent.imageData.strFilePath, strPath)) {
+                            bInUse = true;
+                            break;
+                        }
+                        // 卡片边框内的图片（同样存项目内相对路径，需先解析）
+                        if(rComponent.eType == E_COMPONENT_TYPE_STICKER
+                           && !rComponent.stickerData.strImagePath.isEmpty()
+                           && isSameFile(AssetStore::resolvePath(rComponent.stickerData.strImagePath,
+                                                                 strProjectDir),
+                                         strPath)) {
                             bInUse = true;
                             break;
                         }
                     }
+                    if(bInUse) {
+                        break;
+                    }
+                }
+                if(bInUse) {
+                    break;
                 }
             }
         }
         if(bInUse) {
             QMessageBox::warning(this, QStringLiteral("删除素材"),
-                                 QStringLiteral("该素材正被页面引用，无法删除"));
+                                 QStringLiteral("该素材正被页面（组件或页面背景图）引用，无法删除"));
             return;
         }
         QFile::remove(strPath);

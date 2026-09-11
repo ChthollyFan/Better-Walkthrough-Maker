@@ -37,6 +37,7 @@ QJsonObject ComponentSerializer::toJson(const Component& rComponent)
         textObject.insert(QStringLiteral("color"), colorToString(rComponent.textData.color));
         textObject.insert(QStringLiteral("bold"), rComponent.textData.bBold);
         textObject.insert(QStringLiteral("align"), rComponent.textData.nAlign);
+        textObject.insert(QStringLiteral("opacity"), rComponent.textData.nOpacityPercent);
         componentObject.insert(QStringLiteral("text"), textObject);
     } else if (rComponent.eType == E_COMPONENT_TYPE_TABLE) {
         QJsonObject tableObject;
@@ -61,6 +62,24 @@ QJsonObject ComponentSerializer::toJson(const Component& rComponent)
         stickerObject.insert(QStringLiteral("stickerType"),
                              stickerTypeToString(rComponent.stickerData.eStickerType));
         stickerObject.insert(QStringLiteral("color"), colorToString(rComponent.stickerData.color));
+        // 卡片边框形状：仅卡片边框写入（其它贴纸无此属性），空字段保持 JSON 精简
+        if (rComponent.stickerData.eStickerType == E_STICKER_TYPE_CARD_BORDER) {
+            stickerObject.insert(QStringLiteral("borderShape"),
+                                 cardBorderShapeToString(rComponent.stickerData.eBorderShape));
+            // 边框内的图片（项目内相对路径）；无图片时不写
+            if (!rComponent.stickerData.strImagePath.isEmpty()) {
+                stickerObject.insert(QStringLiteral("imagePath"), rComponent.stickerData.strImagePath);
+                // 取景偏移：居中（0.5）为默认值，非居中时才写入
+                if (!qFuzzyCompare(rComponent.stickerData.dImageOffsetX, 0.5)) {
+                    stickerObject.insert(QStringLiteral("imageOffsetX"),
+                                         rComponent.stickerData.dImageOffsetX);
+                }
+                if (!qFuzzyCompare(rComponent.stickerData.dImageOffsetY, 0.5)) {
+                    stickerObject.insert(QStringLiteral("imageOffsetY"),
+                                         rComponent.stickerData.dImageOffsetY);
+                }
+            }
+        }
         componentObject.insert(QStringLiteral("sticker"), stickerObject);
     } else {
         QJsonObject shapeObject;
@@ -101,6 +120,9 @@ Component ComponentSerializer::fromJson(const QJsonObject& rComponentObject)
     component.textData.color = colorFromString(textObject.value(QStringLiteral("color")).toString());
     component.textData.bBold = textObject.value(QStringLiteral("bold")).toBool(false);
     component.textData.nAlign = textObject.value(QStringLiteral("align")).toInt(Qt::AlignLeft);
+    // 旧版本文件没有 opacity 字段：默认 100（完全不透明），显示效果与旧版一致
+    component.textData.nOpacityPercent =
+        qBound(0, textObject.value(QStringLiteral("opacity")).toInt(100), 100);
 
     const QJsonObject tableObject = rComponentObject.value(QStringLiteral("table")).toObject();
     component.tableData.vecRows.clear();
@@ -129,6 +151,15 @@ Component ComponentSerializer::fromJson(const QJsonObject& rComponentObject)
         ? stickerTypeFromString(stickerTypeValue.toString())
         : E_STICKER_TYPE_TITLE_LINE;
     component.stickerData.color = colorFromString(stickerObject.value(QStringLiteral("color")).toString());
+    // 卡片边框形状：旧文件无该字段时按矩形（与旧版本视觉一致）
+    component.stickerData.eBorderShape = cardBorderShapeFromString(
+        stickerObject.value(QStringLiteral("borderShape")).toString());
+    // 边框内的图片与取景位置：旧文件无这些字段时为空图片、居中取景
+    component.stickerData.strImagePath = stickerObject.value(QStringLiteral("imagePath")).toString();
+    component.stickerData.dImageOffsetX =
+        stickerObject.value(QStringLiteral("imageOffsetX")).toDouble(0.5);
+    component.stickerData.dImageOffsetY =
+        stickerObject.value(QStringLiteral("imageOffsetY")).toDouble(0.5);
 
     const QJsonObject shapeObject = rComponentObject.value(QStringLiteral("shape")).toObject();
     const QJsonValue shapeTypeValue = shapeObject.value(QStringLiteral("shapeType"));

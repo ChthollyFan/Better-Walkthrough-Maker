@@ -44,7 +44,7 @@ public:
 | `strDirPath` | `const QString&` | 导出目标目录 |
 | `dScale` | `qreal` | 分辨率倍率（1.0 = 原尺寸，2.0 = 两倍） |
 | `strAuthor` | `const QString&` | 作者署名（空字符串表示不署名） |
-| `rContext` | `const PluginContext&` | 插件上下文（提供主题背景色等） |
+| `rContext` | `const PluginContext&` | 插件上下文（提供主题背景色、项目目录、署名水印样式等） |
 | `pParent` | `QWidget*` | 父窗口（用于显示进度对话框等） |
 | **返回值** | `int` | 导出成功的文件数量（0 表示失败） |
 
@@ -203,6 +203,18 @@ plugin/builtin/PdfExportProvider.cpp
 
 ## 5. 注意事项
 
+- **署名水印**：用户可在「导出 → 署名设置…」配置位置（四角）、字体族、字号、加粗、颜色与不透明度，
+  该样式通过 `rContext.authorMarkStyle`（`core/AuthorMarkStyle`）传入，**不需要改接口签名**。
+  图片水印请直接复用现有绘制函数：
+
+  ```cpp
+  // dScaleFactor：字号与边距缩放系数（页面导出＝倍率，文章长图＝图片宽度/720）
+  ExportRenderer::drawAuthorMark(image, strAuthor, rContext.authorMarkStyle, dScaleFactor);
+  ```
+
+  `ExportRenderer::renderPage` / `renderLongImage` 的最后一个参数同样是该样式，传入即自动绘制。
+  若导出格式是文本流（如 PDF），位置与不透明度不适用，可只取
+  `authorMarkStyle.color`、`resolvedFontFamily()`、`nFontSize`、`bBold`。
 - `ExportRenderer::renderPage` 和 `ExportRenderer::renderLongImage` 可复用，它们把页面渲染为 `QImage`，导出插件可在此基础上转换为其他格式。
 - 文件名净化是各 Provider 的责任（参考示例中的 `sanitizeFileName` 辅助函数）。
 - 导出是同步操作，长时间导出会阻塞 UI。如需异步导出，应在 Provider 内部使用 `QThread` 或 `QtConcurrent`。

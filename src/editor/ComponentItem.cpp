@@ -5,32 +5,27 @@
  */
 #include "editor/ComponentItem.h"
 
-#include <QCheckBox>
-#include <QClipboard>
+#include <QClipboard>   // 表格编辑：粘贴剪贴板 CSV
 #include <QColorDialog>
-#include <QComboBox>
 #include <QCursor>
 #include <QDialog>
 #include <QDialogButtonBox>
-#include <QFormLayout>
 #include <QGraphicsSceneMouseEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
-#include <QIcon>
-#include <QLineEdit>
 #include <QPainter>
 #include <QPainterPath>
-#include <QPixmap>
 #include <QPushButton>
-#include <QSpinBox>
 #include <QTableWidget>
-#include <QToolButton>
 #include <QVBoxLayout>
 #include <QtMath>
 
 #include "editor/CanvasScene.h"
 #include "core/ComponentPainter.h"
+#include "plugin/builtin/CardBorderDialog.h"
+#include "plugin/builtin/TextStyleDialog.h"
+#include "project/AssetStore.h"
 
 namespace bwm {
 
@@ -40,18 +35,6 @@ constexpr qreal dHandleSize = 8;          // 手柄边长
 constexpr qreal dRotateHandleOffset = 24; // 旋转手柄距组件顶部的距离
 constexpr qreal dMinSize = 8;             // 组件最小边长
 constexpr qreal dHandleHitRadius = 6;     // 手柄命中半径
-
-// 生成一个带边框的色块图标（颜色预览用）。
-QIcon colorSwatchIcon(const QColor& rColor)
-{
-    QPixmap pixmap(16, 16);
-    pixmap.fill(rColor);
-    QPainter painter(&pixmap);
-    painter.setPen(QPen(QColor(120, 120, 120), 1));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawRect(0, 0, pixmap.width() - 1, pixmap.height() - 1);
-    return QIcon(pixmap);
-}
 
 } // namespace
 
@@ -63,9 +46,9 @@ ComponentItem::ComponentItem(const Component& rComponent, QGraphicsItem* pParent
     setAcceptHoverEvents(true);
     setPos(rComponent.pos);
     setRotation(rComponent.dRotation);
-    if (rComponent.eType == E_COMPONENT_TYPE_IMAGE && !rComponent.imageData.strFilePath.isEmpty()) {
-        m_imageCache.load(rComponent.imageData.strFilePath);
-    }
+    // 图片缓存：图片组件与卡片边框图片共用（卡片边框此时可能还没有项目目录，
+    // CanvasScene 随后调用 setProjectDirectory() 会再次刷新）
+    refreshImageCache();
 }
 
 QRectF ComponentItem::boundingRect() const
@@ -79,15 +62,55 @@ QRectF ComponentItem::boundingRect() const
 
 void ComponentItem::setComponent(const Component& rComponent)
 {
-    m_component = rComponent;
+    applyComponentData(rComponent);
     setPos(rComponent.pos);
     setRotation(rComponent.dRotation);
-    if (rComponent.eType == E_COMPONENT_TYPE_IMAGE
-        && !rComponent.imageData.strFilePath.isEmpty()
-        && m_imageCache.isNull()) {
-        m_imageCache.load(rComponent.imageData.strFilePath);
-    }
+}
+
+void ComponentItem::applyComponentData(const Component& rComponent)
+{
+    m_component = rComponent;
+    // 组件数据变了：图片路径可能已更换，缓存必须失效重载，
+    // 否则二次编辑（替换图片）后画布仍显示最初那张图
+    refreshImageCache();
     update();
+}
+
+void ComponentItem::setProjectDirectory(const QString& strDir)
+{
+    if (m_strProjectDirectory == strDir) {
+        return;
+    }
+    m_strProjectDirectory = strDir;
+    // 项目目录变化会改变相对路径的解析结果，缓存需重算
+    refreshImageCache();
+    update();
+}
+
+QString ComponentItem::componentImagePath(const Component& rComponent) const
+{
+    if (rComponent.eType == E_COMPONENT_TYPE_IMAGE) {
+        return rComponent.imageData.strFilePath;
+    }
+    if (rComponent.eType == E_COMPONENT_TYPE_STICKER
+        && rComponent.stickerData.eStickerType == E_STICKER_TYPE_CARD_BORDER) {
+        return AssetStore::resolvePath(rComponent.stickerData.strImagePath,
+                                       m_strProjectDirectory);
+    }
+    return QString();
+}
+
+void ComponentItem::refreshImageCache()
+{
+    const QString strPath = componentImagePath(m_component);
+    if (strPath == m_strCachedImagePath) {
+        return;   // 图片未变化，沿用缓存
+    }
+    m_strCachedImagePath = strPath;
+    m_imageCache = QImage();
+    if (!strPath.isEmpty()) {
+        m_imageCache.load(strPath);
+    }
 }
 
 void ComponentItem::paint(QPainter* pPainter, const QStyleOptionGraphicsItem*, QWidget*)
@@ -101,8 +124,10 @@ void ComponentItem::paint(QPainter* pPainter, const QStyleOptionGraphicsItem*, Q
 void ComponentItem::paintContent(QPainter* pPainter)
 {
     const QRectF contentRect(0, 0, m_component.size.width(), m_component.size.height());
-    // 与导出共用同一渲染实现（见 core/ComponentPainter）
-    ComponentPainter::paint(pPainter, m_component, contentRect, &m_imageCache);
+    // 与导出共用同一渲染实现（见 core/ComponentPainter）；
+    // 传入项目目录以便解析卡片边框图片的相对路径
+    ComponentPainter::paint(pPainter, m_component, contentRect, &m_imageCache,
+                            m_strProjectDirectory);
 }
 
 void ComponentItem::paintSelectionDecoration(QPainter* pPainter)
@@ -395,6 +420,12 @@ void ComponentItem::editContent()
 
 void ComponentItem::editStickerContent()
 {
+    // 卡片边框有专属设置对话框（形状 + 颜色），不走「只选颜色」的简化流程
+    if (m_component.stickerData.eStickerType == E_STICKER_TYPE_CARD_BORDER) {
+        editCardBorder();
+        return;
+    }
+
     emit editStarted();
     const QColor chosen = QColorDialog::getColor(m_component.stickerData.color, nullptr,
                                                  QStringLiteral("选择贴纸颜色"));
@@ -406,77 +437,42 @@ void ComponentItem::editStickerContent()
     emit editFinished();
 }
 
+void ComponentItem::editCardBorder()
+{
+    emit editStarted();
+
+    CardBorderDialog dialog(nullptr, m_component.stickerData, m_strProjectDirectory);
+    if (dialog.exec() == QDialog::Accepted) {
+        Component updated = m_component;
+        updated.stickerData = dialog.stickerData();
+        // 正方形/圆形按组件内接正方形绘制：把尺寸归一为 1:1（以短边为准，位置不变）
+        if (dialog.needsSquareSize()) {
+            const qreal dSide = qMin(updated.size.width(), updated.size.height());
+            updated.size = QSizeF(dSide, dSide);
+        }
+        if (updated.size != m_component.size) {
+            prepareGeometryChange();   // 尺寸变化：让场景重算包围盒
+        }
+        // 统一走数据变更入口：其中的缓存刷新保证「替换图片」后立刻显示新图
+        applyComponentData(updated);
+        emit geometryChanged();
+    }
+
+    emit editFinished();
+}
+
 void ComponentItem::editTextContent()
 {
     emit editStarted();
 
-    // 文本样式编辑对话框：内容 / 字号 / 颜色 / 加粗 / 对齐
-    QDialog dialog;
-    dialog.setWindowTitle(QStringLiteral("编辑文本"));
-    auto* pFormLayout = new QFormLayout(&dialog);
-
-    auto* pContentEdit = new QLineEdit(&dialog);
-    pContentEdit->setText(m_component.textData.strContent);
-    pFormLayout->addRow(QStringLiteral("内容："), pContentEdit);
-
-    auto* pFontSizeSpin = new QSpinBox(&dialog);
-    pFontSizeSpin->setRange(6, 400);
-    pFontSizeSpin->setValue(m_component.textData.nFontSize);
-    pFormLayout->addRow(QStringLiteral("字号："), pFontSizeSpin);
-
-    auto* pBoldCheck = new QCheckBox(QStringLiteral("加粗"), &dialog);
-    pBoldCheck->setChecked(m_component.textData.bBold);
-    pFormLayout->addRow(QStringLiteral("样式："), pBoldCheck);
-
-    auto* pAlignCombo = new QComboBox(&dialog);
-    pAlignCombo->addItem(QStringLiteral("左对齐"), int(Qt::AlignLeft | Qt::AlignVCenter));
-    pAlignCombo->addItem(QStringLiteral("居中"), int(Qt::AlignHCenter | Qt::AlignVCenter));
-    pAlignCombo->addItem(QStringLiteral("右对齐"), int(Qt::AlignRight | Qt::AlignVCenter));
-    pAlignCombo->addItem(QStringLiteral("两端对齐"), int(Qt::AlignJustify | Qt::AlignVCenter));
-    const int nCurrentAlign = m_component.textData.nAlign;
-    int nAlignIndex = 0;
-    for (int nIndex = 0; nIndex < pAlignCombo->count(); ++nIndex) {
-        if (pAlignCombo->itemData(nIndex).toInt() == nCurrentAlign) {
-            nAlignIndex = nIndex;
-            break;
-        }
-    }
-    pAlignCombo->setCurrentIndex(nAlignIndex);
-    pFormLayout->addRow(QStringLiteral("对齐："), pAlignCombo);
-
-    auto* pColorButton = new QToolButton(&dialog);
-    QColor color = m_component.textData.color;
-    // 按钮：正常外观 + 一个色块图标预览当前颜色（避免整块变色）
-    const auto updateColorButton = [pColorButton](const QColor& rColor) {
-        pColorButton->setText(QStringLiteral("选择颜色"));
-        pColorButton->setIcon(colorSwatchIcon(rColor));
-        pColorButton->setIconSize(QSize(16, 16));
-    };
-    updateColorButton(color);
-    connect(pColorButton, &QToolButton::clicked, &dialog, [pColorButton, &color, updateColorButton]() {
-        const QColor chosen = QColorDialog::getColor(color, pColorButton, QStringLiteral("选择文字颜色"));
-        if (chosen.isValid()) {
-            color = chosen;
-            updateColorButton(chosen);
-        }
-    });
-    pFormLayout->addRow(QStringLiteral("颜色："), pColorButton);
-
-    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确定"));
-    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    pFormLayout->addRow(pButtons);
-
+    // 文本样式对话框（内容 / 对齐 / 字体 / 字号 / 加粗 / 颜色 / 不透明度）：
+    // 与「插入 → 文本」共用 TextStyleDialog，避免插入与编辑两处 UI 不一致
+    TextStyleDialog dialog(nullptr, m_component.textData);
     if (dialog.exec() == QDialog::Accepted) {
-        m_component.textData.strContent = pContentEdit->text();
-        m_component.textData.nFontSize = pFontSizeSpin->value();
-        m_component.textData.bBold = pBoldCheck->isChecked();
-        m_component.textData.nAlign = pAlignCombo->currentData().toInt();
-        m_component.textData.color = color;
-        prepareGeometryChange();
-        update();
+        Component updated = m_component;
+        updated.textData = dialog.textData();
+        // 统一走数据变更入口（更新数据 + 刷新缓存 + 重绘）
+        applyComponentData(updated);
         emit geometryChanged();
     }
 

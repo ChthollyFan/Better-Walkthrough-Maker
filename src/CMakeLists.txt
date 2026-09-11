@@ -2,9 +2,12 @@
 # 插件接口与内置适配器（主程序与单元测试共用）
 add_library(bwm_core STATIC
   core/Article.cpp
+  core/AuthorMarkStyle.cpp
   core/Component.cpp
   core/ComponentPainter.cpp
   core/ComponentSerializer.cpp
+  core/ImageFit.cpp
+  core/PageBackground.cpp
   core/Project.cpp
   core/ProjectSerializer.cpp
   core/Template.cpp
@@ -12,18 +15,22 @@ add_library(bwm_core STATIC
   export/ArticleRenderer.cpp
   export/ExportRenderer.cpp
   export/ExportResultHelper.cpp
+  project/AssetStore.cpp
   project/ProjectManager.cpp
   settings/Settings.cpp
   template/BuiltinTemplates.cpp
   template/TemplateManager.cpp
   theme/Theme.cpp
-  # UI 外观层（窗口/控件风格）
+  # UI 外观层（窗口/控件风格）与可复用控件
   ui/AcrylicHelper.cpp
-  ui/AcrylicStyleProvider.cpp
+  ui/FontSelectWidget.cpp
+  ui/GlassStyleProvider.cpp
   ui/UiStyle.cpp
   # 插件接口与宿主
   plugin/PluginHost.cpp
   # 内置适配器
+  plugin/builtin/CardBorderDialog.cpp
+  plugin/builtin/TextStyleDialog.cpp
   plugin/builtin/BuiltinComponentProviders.cpp
   plugin/builtin/BuiltinArticleExportProviders.cpp
   plugin/builtin/BuiltinExportProviders.cpp
@@ -53,6 +60,7 @@ add_executable(bwm WIN32
   app/panels/LayerPanel.cpp
   app/dialogs/NewProjectDialog.cpp
   app/dialogs/ExportDialog.cpp
+  app/dialogs/AuthorMarkDialog.cpp
   app/dialogs/SettingsDialog.cpp
   editor/CanvasScene.cpp
   editor/CanvasView.cpp
@@ -65,3 +73,7 @@ if(WIN32)
 endif()
 
 target_link_libraries(bwm PRIVATE bwm_core)
+
+# 把顶层 project(VERSION) 以宏注入主程序，main.cpp 据此设置 QCoreApplication::applicationVersion()。
+# 好处：版本号只有 CMakeLists.txt 一处来源，「关于」对话框不会再出现版本号忘记同步的情况。
+target_compile_definitions(bwm PRIVATE BWM_VERSION="${PROJECT_VERSION}")

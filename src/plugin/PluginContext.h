@@ -14,6 +14,7 @@
 #include <QSizeF>
 #include <QString>
 
+#include "core/AuthorMarkStyle.h"
 #include "core/Component.h"
 #include "theme/Theme.h"
 
@@ -35,6 +36,10 @@ struct PluginContext
     QSize defaultPageSize;          ///< 全局默认画布尺寸
     QString projectDirectory;       ///< 当前项目目录（素材路径解析用，无项目时为空）
     Page* pCurrentPage = nullptr;   ///< 当前编辑的页面指针（无选中页面时为 nullptr）
+    // 署名水印样式（位置/字体/字号/加粗/颜色/不透明度）。
+    // 由导出对话框「署名设置…」写入后随上下文传给导出 Provider；
+    // 默认值与旧版硬编码水印一致，未设置时导出结果不变。
+    AuthorMarkStyle authorMarkStyle;
 };
 
 } // namespace bwm

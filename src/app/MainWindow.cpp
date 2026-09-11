@@ -44,12 +44,15 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QShowEvent>
 #include <QCoreApplication>
 #include <QCursor>
 #include <QDesktopServices>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPair>
@@ -57,11 +60,13 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QStyleHints>
 #include <QTabWidget>
 #include <QToolBar>
 #include <QUndoStack>
 #include <QUuid>
 #include <QUrl>
+#include <QtGlobal>   // qVersion()：「关于」对话框显示运行时的 Qt 版本
 
 #include <algorithm>
 #include <climits>
@@ -115,8 +120,17 @@ MainWindow::MainWindow(QWidget* pParent)
     connect(m_pView, &CanvasView::contextMenuRequested,
             this, &MainWindow::onCanvasContextMenu);
 
-    applyTheme();   // 应用持久化的主题（画布背景色等）
-    applyUiStyle();  // 应用持久化的 UI 风格（亚克力等窗口外观）
+    applyTheme();   // 应用持久化的画布配色
+    applyUiStyle();  // 应用持久化的界面外观（玻璃风格）
+
+    // 系统深浅色变化时，若当前界面外观为「跟随系统」则重新应用外观。
+    // 样式表与渐变底都不做缓存，重新应用即可完整切换深浅。
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            this, [this](Qt::ColorScheme) {
+        if(UiStyleManager::currentStyleId() == UiStyleManager::kAutoId) {
+            applyUiStyle();
+        }
+    });
 }
 
 MainWindow::~MainWindow() = default;
@@ -127,6 +141,20 @@ void MainWindow::showEvent(QShowEvent* pEvent)
     // 窗口可见后重新应用 UI 风格，确保 DWM 亚克力模糊在窗口有可见区域后生效。
     // 幂等：DWM 属性与 stylesheet 重复设置无害。
     applyUiStyle();
+}
+
+void MainWindow::paintEvent(QPaintEvent* pEvent)
+{
+    // 委托当前 UI 风格绘制窗口背景（玻璃拟态风格会画一层彩色渐变底）。
+    // 若风格未提供背景绘制（使用接口默认实现），返回 false，
+    // 此时走 Qt 默认绘制，保证非玻璃风格的外观不受影响。
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    const bool bPainted = UiStyleManager::paintWindowBackground(this, painter);
+    painter.end();
+    if(!bPainted) {
+        QMainWindow::paintEvent(pEvent);
+    }
 }
 
 // =========================================================================
@@ -184,6 +212,11 @@ void MainWindow::createMenus()
     QAction* pAddPageAction = pWalkthroughMenu->addAction(QStringLiteral("新建页面(&P)"));
     connect(pAddPageAction, &QAction::triggered,
             m_pTreePanel, &ProjectTreePanel::onAddPage);
+    // 从图片新建页面：页面尺寸取图片原始尺寸，图片作为整页背景图
+    QAction* pAddPageFromImageAction =
+        pWalkthroughMenu->addAction(QStringLiteral("从图片新建页面(&I)…"));
+    connect(pAddPageFromImageAction, &QAction::triggered,
+            m_pTreePanel, &ProjectTreePanel::onAddPageFromImage);
     pWalkthroughMenu->addSeparator();
     QAction* pRenameNodeAction = pWalkthroughMenu->addAction(QStringLiteral("重命名(&R)…"));
     connect(pRenameNodeAction, &QAction::triggered,
@@ -296,13 +329,22 @@ void MainWindow::createMenus()
     pSnapGuidesAction->setChecked(m_pScene->snapToGuides());
     connect(pSnapGuidesAction, &QAction::toggled, this, &MainWindow::onToggleSnapToGuides);
 
-    // ---- 主题菜单（从 PluginHost 动态构建）----
+    // ---- 主题菜单 ----
     QMenu* pThemeMenu = menuBar()->addMenu(QStringLiteral("主题(&T)"));
-    auto* pThemeGroup = new QActionGroup(this);
-    const QString strCurrentTheme = ThemeManager::currentThemeName();
-    // 遍历所有主题 Provider，合并主题列表
+
+    // 画布配色：合并所有主题 Provider 提供的主题。
+    // 当前仅内置「浅色页面」一种，此时不渲染该分组（单项单选没有意义）；
+    // 若将来新增画布主题，分组会自动出现。
+    QVector<Theme> vecCanvasThemes;
     for(const IThemeProvider* pProvider : m_pHost->themeProviders()) {
-        for(const Theme& rTheme : pProvider->themes()) {
+        vecCanvasThemes.append(pProvider->themes());
+    }
+    const bool bShowCanvasGroup = (vecCanvasThemes.size() > 1);
+    if(bShowCanvasGroup) {
+        pThemeMenu->addSection(QStringLiteral("画布配色"));
+        auto* pThemeGroup = new QActionGroup(this);
+        const QString strCurrentTheme = ThemeManager::currentThemeName();
+        for(const Theme& rTheme : vecCanvasThemes) {
             QAction* pThemeAction = pThemeMenu->addAction(rTheme.strName);
             pThemeAction->setCheckable(true);
             pThemeAction->setData(rTheme.strName);
@@ -311,14 +353,17 @@ void MainWindow::createMenus()
             }
             pThemeGroup->addAction(pThemeAction);
         }
+        connect(pThemeGroup, &QActionGroup::triggered, this, [this](QAction* pAction) {
+            ThemeManager::setCurrentThemeName(pAction->data().toString());
+            applyTheme();
+        });
     }
-    connect(pThemeGroup, &QActionGroup::triggered, this, [this](QAction* pAction) {
-        ThemeManager::setCurrentThemeName(pAction->data().toString());
-        applyTheme();
-    });
 
-    // ---- 界面外观分组（UI 风格，与画布配色独立）----
-    pThemeMenu->addSection(QStringLiteral("界面外观"));
+    // ---- 界面外观（与画布配色独立）----
+    // 仅当画布配色分组同时存在时才加分区标题，避免菜单里出现多余的分节文字
+    if(bShowCanvasGroup) {
+        pThemeMenu->addSection(QStringLiteral("界面外观"));
+    }
     auto* pUiStyleGroup = new QActionGroup(this);
     const QString strCurrentUiStyle = UiStyleManager::currentStyleId();
     for(const UiStyleDescriptor& rDesc : UiStyleManager::availableStyles()) {
@@ -464,6 +509,9 @@ void MainWindow::createCentralWidget()
     m_pAssetPanel = new AssetPanel(m_pTabPanel, m_pProjectManager);
     connect(m_pAssetPanel, &AssetPanel::assetInserted,
             this, &MainWindow::onAssetInserted);
+    // 项目树导入图片（从图片新建页面 / 设置背景图）后，素材库需要刷新以显示新素材
+    connect(m_pTreePanel, &ProjectTreePanel::assetsChanged,
+            m_pAssetPanel, &AssetPanel::refreshAssetList);
     m_pTabPanel->addTab(m_pAssetPanel, QStringLiteral("素材库"));
 
     // 图层面板
@@ -630,9 +678,11 @@ void MainWindow::onCopyPageToClipboard()
         return;
     }
     const QImage image = ExportRenderer::renderPage(*pPage, 2.0,
-                                                    ThemeManager::currentTheme().backgroundColor);
+                                                    ThemeManager::currentTheme().backgroundColor,
+                                                    QString(),
+                                                    m_pProjectManager->projectDirectory());
     QApplication::clipboard()->setImage(image);
-    statusBar()->showMessage(QStringLiteral("当前页已复制到剪贴板（2x），可直接粘贴到小黑盒"), 4000);
+    statusBar()->showMessage(QStringLiteral("当前页已复制到剪贴板（2x），可直接粘贴使用"), 4000);
 }
 
 void MainWindow::onShowSettings()
@@ -668,13 +718,21 @@ void MainWindow::onShowShortcuts()
 
 void MainWindow::onShowAbout()
 {
-    QMessageBox::about(this, QStringLiteral("关于 更好的攻略制作器"),
-                       QStringLiteral(
-                           "更好的攻略制作器（Better Walkthrough Maker）\n"
-                           "版本 %1\n\n"
-                           "面向游戏攻略作者的桌面设计工具：\n"
-                           "用模板 + 自由画布制作攻略配图，导出 PNG 发布到小黑盒等平台。")
-                       .arg(QCoreApplication::applicationVersion()));
+    // 「关于」文案随功能迭代同步更新（0.3.0 起补入文章攻略与多格式导出，此前停留在初版介绍）。
+    // 注意：介绍里只说明"能做出什么、能导出什么格式"，不点名任何发布平台。
+    // %1 = 应用版本（见 main.cpp），%2 = 运行时 Qt 版本。
+    QMessageBox::about(
+        this, QStringLiteral("关于 更好的攻略制作器"),
+        QStringLiteral("更好的攻略制作器（Better Walkthrough Maker）\n"
+                       "版本 %1\n\n"
+                       "面向游戏攻略作者的桌面设计工具，用「模板 + 自由画布」制作攻略内容：\n"
+                       "  · 图文攻略页面：图片 / 文本 / 表格 / 形状 / 贴纸自由排版\n"
+                       "  · 文章攻略：Markdown 分栏编辑，正文可引用攻略页面\n"
+                       "  · 模板与美化包：内置模板、贴纸装饰、主题配色\n"
+                       "  · 导出：页面与文章均可导出（PNG / PDF / Markdown），可选作者署名\n\n"
+                       "许可协议：MIT\n"
+                       "基于 Qt %2 构建")
+            .arg(QCoreApplication::applicationVersion(), QString::fromLatin1(qVersion())));
 }
 
 void MainWindow::onToggleAutoSave(bool bEnabled)
@@ -780,6 +838,8 @@ void MainWindow::updateCanvasEditor()
         return;
     }
     m_bSyncingCanvas = true;
+    // 先告知画布项目目录：页面背景图的相对路径需要它来解析
+    m_pScene->setProjectDirectory(m_pProjectManager->projectDirectory());
     m_pScene->loadPage(*pPage);
     m_bSyncingCanvas = false;
     m_pView->fitInView(m_pScene->sceneRect(), Qt::KeepAspectRatio);
@@ -852,10 +912,19 @@ void MainWindow::applyTheme()
 
 void MainWindow::applyUiStyle()
 {
-    // 应用当前 UI 风格（亚克力等）到主窗口。非 Windows 或失败时回退 system。
+    // 应用当前 UI 风格（亚克力/玻璃等）到主窗口。
     // 不调用 applyTheme：画布背景由 CanvasScene 的页面矩形控制，不受窗口透明影响；
     // 且 applyTheme 会重建画布，showEvent 多次触发会丢失选中状态。
     UiStyleManager::applyCurrentStyle(this);
+
+    // 画布视口背景：玻璃风格返回全透明色，让窗口渐变透上来到画布区域；
+    // 其他风格返回无效色，此时恢复画布默认的深灰底。
+    const QColor canvasColor = UiStyleManager::canvasBackgroundColor();
+    m_pView->setBackgroundBrush(canvasColor.isValid() ? canvasColor
+                                                      : CanvasView::defaultBackgroundColor());
+
+    // 触发重绘以应用新的窗口背景渐变
+    update();
 }
 
 // =========================================================================
@@ -919,6 +988,8 @@ PluginContext MainWindow::makeContext() const
     ctx.defaultPageSize = Settings::defaultPageSize();
     ctx.projectDirectory = m_pProjectManager->hasProject()
         ? m_pProjectManager->projectDirectory() : QString();
+    // 署名水印样式：导出对话框还会在导出前用最新设置覆盖一次
+    ctx.authorMarkStyle = Settings::authorMarkStyle();
     // 注意：currentPage 返回非 const，这里不能在 const 方法中调用
     // pCurrentPage 由调用方在需要时单独设置
     return ctx;
@@ -1162,11 +1233,16 @@ void MainWindow::onCanvasContextMenu(const QPointF& rScenePos)
         if(eType == E_COMPONENT_TYPE_TEXT || eType == E_COMPONENT_TYPE_TABLE
            || eType == E_COMPONENT_TYPE_STICKER) {
             menu.addSeparator();
+            // 贴纸里只有卡片边框有可编辑的形状选项，文案单独区分
+            const bool bCardBorder = eType == E_COMPONENT_TYPE_STICKER
+                && pHitItem->component().stickerData.eStickerType == E_STICKER_TYPE_CARD_BORDER;
             pEditTextAction = menu.addAction(eType == E_COMPONENT_TYPE_TEXT
                                                  ? QStringLiteral("编辑文本…")
                                                  : eType == E_COMPONENT_TYPE_TABLE
                                                      ? QStringLiteral("编辑表格…")
-                                                     : QStringLiteral("编辑贴纸…"));
+                                                     : bCardBorder
+                                                         ? QStringLiteral("编辑卡片边框…")
+                                                         : QStringLiteral("编辑贴纸…"));
         }
         menu.addSeparator();
         pLockAction = menu.addAction(pHitItem->component().bLocked

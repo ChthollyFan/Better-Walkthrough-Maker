@@ -8,6 +8,7 @@
  */
 #include "app/dialogs/ExportDialog.h"
 
+#include "app/dialogs/AuthorMarkDialog.h"
 #include "core/Article.h"
 #include "core/Project.h"
 #include "plugin/PluginHost.h"
@@ -43,6 +44,7 @@ public:
     QComboBox* pFormatCombo = nullptr;            ///< 导出格式下拉框
     QComboBox* pScaleCombo = nullptr;             ///< 分辨率倍率下拉框
     QCheckBox* pAuthorCheck = nullptr;            ///< 添加作者署名
+    QPushButton* pAuthorStyleButton = nullptr;    ///< 署名设置…（位置/字体/颜色/字号/透明度）
     QLineEdit* pDirEdit = nullptr;                ///< 导出目录输入框
     QGroupBox* pTargetGroup = nullptr;            ///< 导出范围分组（文章模式下隐藏）
     QGroupBox* pScaleGroup = nullptr;             ///< 倍率分组（文章模式下隐藏，复用 pAuthorCheck 所在行）
@@ -94,16 +96,22 @@ ExportDialog::ExportDialog(QWidget* pParent, ProjectManager* pProjectManager,
     pFormLayout->addRow(QStringLiteral("分辨率倍率："), m_pUi->pScaleCombo);
 
     // ---- 作者署名选项 ----
+    // 复选框控制「是否署名」，右侧「署名设置…」按钮打开水印样式设置对话框
+    // （位置 / 字体 / 字号 / 加粗 / 颜色 / 不透明度，见 AuthorMarkDialog）。
     m_pUi->pAuthorCheck = new QCheckBox(this);
-    const QString strAuthorName = Settings::authorName();
-    if(strAuthorName.trimmed().isEmpty()) {
-        m_pUi->pAuthorCheck->setText(QStringLiteral("添加作者署名（请先在 文件→设置 中填写）"));
-        m_pUi->pAuthorCheck->setEnabled(false);
-    } else {
-        m_pUi->pAuthorCheck->setText(QStringLiteral("添加作者署名（by %1）").arg(strAuthorName));
-        m_pUi->pAuthorCheck->setChecked(true);
-    }
-    pFormLayout->addRow(m_pUi->pAuthorCheck);
+    m_pUi->pAuthorCheck->setChecked(!Settings::authorName().trimmed().isEmpty());
+    m_pUi->pAuthorStyleButton = new QPushButton(QStringLiteral("署名设置…"), this);
+    connect(m_pUi->pAuthorStyleButton, &QPushButton::clicked,
+            this, &ExportDialog::onOpenAuthorMarkDialog);
+    // 取消勾选后按钮禁用：没有署名就无需调水印样式
+    connect(m_pUi->pAuthorCheck, &QCheckBox::toggled, this, [this](bool bChecked) {
+        m_pUi->pAuthorStyleButton->setEnabled(bChecked);
+    });
+    auto* pAuthorRow = new QHBoxLayout;
+    pAuthorRow->addWidget(m_pUi->pAuthorCheck);
+    pAuthorRow->addWidget(m_pUi->pAuthorStyleButton);
+    pFormLayout->addRow(pAuthorRow);
+    updateAuthorMarkControls();
 
     // ---- 导出目录（默认填充上次导出目录）----
     m_pUi->pDirEdit = new QLineEdit(this);
@@ -143,6 +151,38 @@ ExportDialog::ExportDialog(QWidget* pParent, ProjectManager* pProjectManager,
 void ExportDialog::setCurrentPageKey(const QString& rKey)
 {
     m_strCurrentPageKey = rKey;
+}
+
+void ExportDialog::updateAuthorMarkControls()
+{
+    const QString strAuthorName = Settings::authorName().trimmed();
+    if(strAuthorName.isEmpty()) {
+        m_pUi->pAuthorCheck->setText(
+            QStringLiteral("添加作者署名（请先在 文件→设置 中填写）"));
+        m_pUi->pAuthorCheck->setEnabled(false);
+    } else {
+        // 文案附带当前位置，导出前一眼可见水印会落在哪个角
+        const AuthorMarkStyle style = Settings::authorMarkStyle();
+        m_pUi->pAuthorCheck->setText(
+            QStringLiteral("添加作者署名（by %1 · %2）")
+                .arg(strAuthorName, authorMarkPositionDisplayName(style.ePosition)));
+        m_pUi->pAuthorCheck->setEnabled(true);
+    }
+    m_pUi->pAuthorStyleButton->setEnabled(m_pUi->pAuthorCheck->isChecked());
+}
+
+void ExportDialog::onOpenAuthorMarkDialog()
+{
+    AuthorMarkDialog dialog(this, Settings::authorMarkStyle(), Settings::authorName());
+    if(dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    // 署名样式是全局设置：确定后立即持久化，下次导出沿用
+    const AuthorMarkStyle style = dialog.style();
+    Settings::setAuthorMarkStyle(style);
+    // 同步到本次导出上下文：Provider 通过 PluginContext 读取样式（不改插件接口签名）
+    m_context.authorMarkStyle = style;
+    updateAuthorMarkControls();
 }
 
 void ExportDialog::setCurrentArticleKey(const QString& rKey)
@@ -189,6 +229,8 @@ void ExportDialog::onAccept()
 
     const QString strAuthor = m_pUi->pAuthorCheck->isChecked()
         ? Settings::authorName() : QString();
+    // 署名水印样式：从全局设置取最新值同步到本次导出上下文（在署名设置里改完即生效）
+    m_context.authorMarkStyle = Settings::authorMarkStyle();
 
     // ---- 文章导出路径 ----
     if(!m_strCurrentArticleKey.isEmpty()) {

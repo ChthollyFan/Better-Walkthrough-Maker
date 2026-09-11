@@ -60,7 +60,8 @@ SettingsDialog::SettingsDialog(QWidget* pParent, ProjectManager* pProjectManager
 
     // 作者署名
     m_pUi->pAuthorEdit = new QLineEdit(this);
-    m_pUi->pAuthorEdit->setPlaceholderText(QStringLiteral("如小黑盒 ID"));
+    // 占位符只给通用示例，不点名具体发布平台（导出后粘贴到何处由用户自行决定）
+    m_pUi->pAuthorEdit->setPlaceholderText(QStringLiteral("如作者昵称 / ID"));
     m_pUi->pAuthorEdit->setText(Settings::authorName());
     pFormLayout->addRow(QStringLiteral("作者署名："), m_pUi->pAuthorEdit);
 

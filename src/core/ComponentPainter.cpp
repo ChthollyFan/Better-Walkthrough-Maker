@@ -11,6 +11,9 @@
 #include <QPolygonF>
 #include <QtMath>
 
+#include "core/ImageFit.h"
+#include "project/AssetStore.h"
+
 namespace bwm {
 
 namespace {
@@ -28,10 +31,41 @@ void drawStar(QPainter* pPainter, const QPointF& rCenter, qreal dRadius)
     pPainter->drawPolygon(polygon);
 }
 
+// 卡片边框的外框区域：正方形/圆形取组件矩形的内接正方形（居中），
+// 矩形/椭圆填满整个组件矩形
+QRectF cardBorderOuterRect(const QRectF& rRect, E_CARD_BORDER_SHAPE eShape)
+{
+    if (eShape != E_CARD_BORDER_SHAPE_SQUARE && eShape != E_CARD_BORDER_SHAPE_CIRCLE) {
+        return rRect;
+    }
+    const qreal dSide = qMin(rRect.width(), rRect.height());
+    return QRectF(rRect.center().x() - dSide / 2.0, rRect.center().y() - dSide / 2.0,
+                  dSide, dSide);
+}
+
+// 按形状构造边框路径：圆形/椭圆为椭圆，矩形/正方形为圆角矩形（圆角半径仅这两种用到）
+QPainterPath cardBorderPath(const QRectF& rRect, E_CARD_BORDER_SHAPE eShape, qreal dCornerRadius)
+{
+    QPainterPath path;
+    switch (eShape) {
+    case E_CARD_BORDER_SHAPE_CIRCLE:
+    case E_CARD_BORDER_SHAPE_ELLIPSE:
+        path.addEllipse(rRect);
+        break;
+    case E_CARD_BORDER_SHAPE_SQUARE:
+    case E_CARD_BORDER_SHAPE_RECTANGLE:
+    default:
+        path.addRoundedRect(rRect, dCornerRadius, dCornerRadius);
+        break;
+    }
+    return path;
+}
+
 } // namespace
 
 void ComponentPainter::paint(QPainter* pPainter, const Component& rComponent,
-                             const QRectF& rContentRect, QImage* pImageCache)
+                             const QRectF& rContentRect, QImage* pImageCache,
+                             const QString& strProjectDirectory)
 {
     if (rComponent.eType == E_COMPONENT_TYPE_IMAGE) {
         QImage image;
@@ -60,11 +94,14 @@ void ComponentPainter::paint(QPainter* pPainter, const Component& rComponent,
 
     if (rComponent.eType == E_COMPONENT_TYPE_TEXT) {
         const TextData& rText = rComponent.textData;
-        QFont font(rText.strFontFamily.isEmpty() ? QStringLiteral("Microsoft YaHei") : rText.strFontFamily);
+        QFont font(rText.strFontFamily.isEmpty() ? textDefaultFontFamily() : rText.strFontFamily);
         font.setPixelSize(rText.nFontSize);
         font.setBold(rText.bBold);
         pPainter->setFont(font);
-        pPainter->setPen(rText.color);
+        // 不透明度：颜色只存 RGB，绘制时把 nOpacityPercent 合成到 alpha
+        QColor textColor = rText.color;
+        textColor.setAlphaF(qBound(0, rText.nOpacityPercent, 100) / 100.0);
+        pPainter->setPen(textColor);
         pPainter->drawText(rContentRect, rText.nAlign, rText.strContent);
         return;
     }
@@ -178,12 +215,50 @@ void ComponentPainter::paint(QPainter* pPainter, const Component& rComponent,
         }
         case E_STICKER_TYPE_CARD_BORDER:
         default: {
-            // 卡片边框：外框 + 内框
-            pPainter->setPen(QPen(color, 3));
+            // 卡片边框：按形状绘制双层线（外粗内细）。
+            // 矩形/正方形 → 圆角矩形（矩形时与原实现像素一致）；圆形/椭圆 → 椭圆；
+            // 正方形/圆形取组件内接正方形，居中绘制。
+            const E_CARD_BORDER_SHAPE eShape = rSticker.eBorderShape;
+            const QRectF outerRect = cardBorderOuterRect(rect, eShape);
+            constexpr qreal dGap = 6;   // 内外框间距（与原实现一致）
+            constexpr qreal dOuterCornerRadius = 8;
+
+            // ① 边框内的图片：按边框形状裁剪，**框内显示、框外隐藏**。
+            //    图片按「等比覆盖」铺满外框，取景位置由 StickerData 的偏移决定；
+            //    图片缺失（未设置或文件已删）时跳过，只剩边框线。
+            if (!rSticker.strImagePath.isEmpty()) {
+                QImage image;
+                if (pImageCache) {
+                    if (pImageCache->isNull()) {
+                        pImageCache->load(AssetStore::resolvePath(rSticker.strImagePath,
+                                                                  strProjectDirectory));
+                    }
+                    image = *pImageCache;
+                } else {
+                    image.load(AssetStore::resolvePath(rSticker.strImagePath,
+                                                       strProjectDirectory));
+                }
+                if (!image.isNull()) {
+                    pPainter->save();
+                    pPainter->setClipPath(cardBorderPath(outerRect, eShape, dOuterCornerRadius));
+                    pPainter->setRenderHint(QPainter::SmoothPixmapTransform);
+                    ImageFit::paintCover(pPainter, image, outerRect,
+                                         rSticker.dImageOffsetX, rSticker.dImageOffsetY);
+                    pPainter->restore();
+                }
+            }
+
+            // ② 边框线：绘制在图片之上，保证线条不被图片盖住
             pPainter->setBrush(Qt::NoBrush);
-            pPainter->drawRoundedRect(rect, 8, 8);
-            pPainter->setPen(QPen(color, 1));
-            pPainter->drawRoundedRect(rect.adjusted(6, 6, -6, -6), 5, 5);
+            pPainter->setPen(QPen(color, 3));
+            pPainter->drawPath(cardBorderPath(outerRect, eShape, dOuterCornerRadius));
+
+            // 内框：与外框保持 dGap 间距；尺寸过小时不再绘制，避免两圈线重叠成一团
+            const QRectF innerRect = outerRect.adjusted(dGap, dGap, -dGap, -dGap);
+            if (innerRect.width() > 2 && innerRect.height() > 2) {
+                pPainter->setPen(QPen(color, 1));
+                pPainter->drawPath(cardBorderPath(innerRect, eShape, 5));
+            }
             break;
         }
         }

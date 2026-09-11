@@ -37,6 +37,8 @@ private slots:
     void testMarkdownExport();
     void testPngExport();
     void testPngAuthorMark();
+    // 署名样式（位置/字号/颜色）经 PluginContext 传给 Provider 并生效
+    void testPngAuthorMarkStyle();
     void testPngTextVisibleInDarkTheme();
     void testPdfExport();
     void testSanitizeFileName();
@@ -310,6 +312,60 @@ void TestArticleExport::testPngAuthorMark()
     QVERIFY2(nPixelsWithAuthor > nPixelsNoAuthor,
              qPrintable(QStringLiteral("署名未绘制：无署名 %1 像素，有署名 %2 像素")
                             .arg(nPixelsNoAuthor).arg(nPixelsWithAuthor)));
+}
+
+void TestArticleExport::testPngAuthorMarkStyle()
+{
+    // 署名样式经 PluginContext 传到 Provider：左上角 + 大字号 + 红色应生效。
+    // 校验方式：与「无署名」导出图逐像素比较，差异只允许落在左上角区域。
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const Project project = makeProject();
+    const Article article = makeArticle();
+    ArticlePngExportProvider provider;
+
+    // ---- 基准图：无署名 ----
+    const QString strDirNoAuthor = QDir(tempDir.path()).filePath(QStringLiteral("style_none"));
+    QDir().mkpath(strDirNoAuthor);
+    QCOMPARE(provider.exportArticle(article, project, QStringLiteral("无署名"),
+                                    strDirNoAuthor, QString(), makeContext(tempDir.path()),
+                                    nullptr), 1);
+    const QImage imageNoAuthor(QDir(strDirNoAuthor).filePath(QStringLiteral("无署名.png")));
+    QVERIFY(!imageNoAuthor.isNull());
+
+    // ---- 自定义样式：左上角 / 48px / 红色 / 不透明 ----
+    PluginContext ctx = makeContext(tempDir.path());
+    ctx.authorMarkStyle.ePosition = E_AUTHOR_MARK_POSITION_TOP_LEFT;
+    ctx.authorMarkStyle.nFontSize = 48;
+    ctx.authorMarkStyle.color = QColor(Qt::red);
+    ctx.authorMarkStyle.nOpacityPercent = 100;
+
+    const QString strDirStyled = QDir(tempDir.path()).filePath(QStringLiteral("style_topleft"));
+    QDir().mkpath(strDirStyled);
+    QCOMPARE(provider.exportArticle(article, project, QStringLiteral("左上署名"),
+                                    strDirStyled, QStringLiteral("测试作者"), ctx, nullptr), 1);
+    const QImage imageStyled(QDir(strDirStyled).filePath(QStringLiteral("左上署名.png")));
+    QVERIFY(!imageStyled.isNull());
+    QCOMPARE(imageStyled.size(), imageNoAuthor.size());
+
+    // 差异统计：左上区域应有差异，其余区域必须完全一致（说明水印没画到别处）
+    int nDiffTopLeft = 0;
+    int nDiffOther = 0;
+    for(int nY = 0; nY < imageNoAuthor.height(); ++nY) {
+        for(int nX = 0; nX < imageNoAuthor.width(); ++nX) {
+            if(imageNoAuthor.pixel(nX, nY) == imageStyled.pixel(nX, nY)) {
+                continue;
+            }
+            if(nX < imageNoAuthor.width() / 2 && nY < imageNoAuthor.height() / 2) {
+                ++nDiffTopLeft;
+            } else {
+                ++nDiffOther;
+            }
+        }
+    }
+    QVERIFY2(nDiffTopLeft > 0, "左上角署名样式未生效");
+    QCOMPARE(nDiffOther, 0);
 }
 
 void TestArticleExport::testPngTextVisibleInDarkTheme()

@@ -5,6 +5,8 @@
  */
 #include "settings/Settings.h"
 
+#include "core/Component.h"   // colorToString / colorFromString（署名颜色持久化复用）
+
 #include <QCoreApplication>
 #include <QSettings>
 
@@ -60,6 +62,38 @@ void Settings::setAuthorName(const QString& strName)
     settings().setValue(QStringLiteral("authorName"), strName);
 }
 
+AuthorMarkStyle Settings::authorMarkStyle()
+{
+    // 逐项读取：任一键缺失时退回 AuthorMarkStyle 的默认值（等价旧版硬编码水印）
+    AuthorMarkStyle style;
+    style.ePosition = authorMarkPositionFromString(
+        settings().value(QStringLiteral("authorMark/position")).toString());
+    style.strFontFamily = settings().value(QStringLiteral("authorMark/fontFamily")).toString();
+    style.nFontSize = settings().value(QStringLiteral("authorMark/fontSize"),
+                                       AuthorMarkStyle::nDefaultFontSize).toInt();
+    style.bBold = settings().value(QStringLiteral("authorMark/bold"), false).toBool();
+    // 颜色只存 #RRGGBB（colorToString 不保留 alpha，透明度由 nOpacityPercent 单独负责）
+    style.color = colorFromString(
+        settings().value(QStringLiteral("authorMark/color")).toString());
+    style.nOpacityPercent = settings().value(QStringLiteral("authorMark/opacity"),
+                                             AuthorMarkStyle::nDefaultOpacityPercent).toInt();
+    style.clamp();   // 配置被手改出越界值时收敛，避免绘制异常
+    return style;
+}
+
+void Settings::setAuthorMarkStyle(const AuthorMarkStyle& rStyle)
+{
+    AuthorMarkStyle style = rStyle;
+    style.clamp();
+    settings().setValue(QStringLiteral("authorMark/position"),
+                        authorMarkPositionToString(style.ePosition));
+    settings().setValue(QStringLiteral("authorMark/fontFamily"), style.strFontFamily);
+    settings().setValue(QStringLiteral("authorMark/fontSize"), style.nFontSize);
+    settings().setValue(QStringLiteral("authorMark/bold"), style.bBold);
+    settings().setValue(QStringLiteral("authorMark/color"), colorToString(style.color));
+    settings().setValue(QStringLiteral("authorMark/opacity"), style.nOpacityPercent);
+}
+
 QStringList Settings::recentProjects()
 {
     return settings().value(QStringLiteral("recentProjects")).toStringList();
@@ -72,7 +106,7 @@ void Settings::setRecentProjects(const QStringList& vecPaths)
 
 QString Settings::themeName()
 {
-    return settings().value(QStringLiteral("theme"), QStringLiteral("浅色简洁风")).toString();
+    return settings().value(QStringLiteral("theme"), QStringLiteral("浅色页面")).toString();
 }
 
 void Settings::setThemeName(const QString& rName)
@@ -83,7 +117,7 @@ void Settings::setThemeName(const QString& rName)
 QString Settings::uiStyle()
 {
     return settings().value(QStringLiteral("ui/style"),
-                            QStringLiteral("acrylic-dark")).toString();
+                            QStringLiteral("auto")).toString();
 }
 
 void Settings::setUiStyle(const QString& rId)

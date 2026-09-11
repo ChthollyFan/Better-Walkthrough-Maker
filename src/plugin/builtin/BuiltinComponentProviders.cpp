@@ -9,14 +9,12 @@
  */
 #include "plugin/builtin/BuiltinComponentProviders.h"
 
+#include "plugin/builtin/CardBorderDialog.h"
+#include "plugin/builtin/TextStyleDialog.h"
+#include "project/AssetStore.h"
 #include "settings/Settings.h"
 
-#include <QDir>
 #include <QFileDialog>
-#include <QFileInfo>
-#include <QInputDialog>
-#include <QLineEdit>
-#include <QUuid>
 
 namespace bwm {
 
@@ -64,24 +62,13 @@ bool ImageComponentProvider::showInputDialog(QWidget* pParent, Component& rCompo
         return false;   // 用户取消
     }
 
-    QString strAssetPath = strFilePath;
-    // 优先复制进项目 assets/（自包含；有项目时才复制）
-    if(!rContext.projectDirectory.isEmpty()) {
-        const QString strAssetsDir = rContext.projectDirectory + QStringLiteral("/assets");
-        QDir dir(strAssetsDir);
-        if(!dir.exists()) {
-            dir.mkpath(QStringLiteral("."));
-        }
-        const QFileInfo info(strFilePath);
-        const QString strTarget = dir.filePath(
-            QUuid::createUuid().toString(QUuid::WithoutBraces)
-            + QLatin1Char('.') + info.suffix());
-        if(QFile::copy(strFilePath, strTarget)) {
-            strAssetPath = strTarget;
-        }
-    }
-
-    rComponent.imageData.strFilePath = strAssetPath;
+    // 复制进项目 assets/（保证项目自包含）；未打开项目或复制失败时退回直接引用源文件。
+    // 复制逻辑统一走 AssetStore，与页面背景图导入共用同一实现。
+    QString strErrorMessage;
+    const QString strImportedPath = AssetStore::importImage(strFilePath,
+                                                            rContext.projectDirectory,
+                                                            &strErrorMessage);
+    rComponent.imageData.strFilePath = strImportedPath.isEmpty() ? strFilePath : strImportedPath;
     return true;
 }
 
@@ -122,14 +109,14 @@ bool TextComponentProvider::showInputDialog(QWidget* pParent, Component& rCompon
                                             const PluginContext& rContext) const
 {
     (void)rContext;
-    bool bOk = false;
-    const QString strContent = QInputDialog::getText(
-        pParent, QStringLiteral("插入文本"), QStringLiteral("文本内容："),
-        QLineEdit::Normal, QStringLiteral("攻略文本"), &bOk);
-    if(!bOk) {
+    // 文本样式对话框：内容 + 对齐 + 字体/字号/加粗/颜色/不透明度。
+    // 与「双击编辑文本」共用 TextStyleDialog，插入时即可完成样式设置，
+    // 不必再「插入后双击组件」二次修改。
+    TextStyleDialog dialog(pParent, rComponent.textData);
+    if(dialog.exec() != QDialog::Accepted) {
         return false;   // 用户取消
     }
-    rComponent.textData.strContent = strContent;
+    rComponent.textData = dialog.textData();
     return true;
 }
 
@@ -283,6 +270,31 @@ Component StickerComponentProvider::createComponent(const PluginContext& rContex
         break;
     }
     return component;
+}
+
+bool StickerComponentProvider::requiresInputDialog() const
+{
+    // 卡片边框的四种形状合并在这一个插入项里，插入时先让用户选形状与颜色；
+    // 其它贴纸保持「直接插入」的原有行为。
+    return m_eStickerType == E_STICKER_TYPE_CARD_BORDER;
+}
+
+bool StickerComponentProvider::showInputDialog(QWidget* pParent, Component& rComponent,
+                                               const PluginContext& rContext) const
+{
+    // 传项目目录：对话框选图时把图片复制进 assets/ 并记录相对路径
+    CardBorderDialog dialog(pParent, rComponent.stickerData, rContext.projectDirectory);
+    if(dialog.exec() != QDialog::Accepted) {
+        return false;   // 用户取消
+    }
+    rComponent.stickerData = dialog.stickerData();
+    // 正方形/圆形按组件内接正方形绘制：把组件尺寸归一为 1:1（以短边为准），
+    // 使选择手柄与图形边界一致，不出现「框比图形大一圈」
+    if(dialog.needsSquareSize()) {
+        const qreal dSide = qMin(rComponent.size.width(), rComponent.size.height());
+        rComponent.size = QSizeF(dSide, dSide);
+    }
+    return true;
 }
 
 } // namespace bwm

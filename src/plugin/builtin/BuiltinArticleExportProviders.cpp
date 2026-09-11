@@ -95,7 +95,8 @@ int ArticleMarkdownExportProvider::exportArticle(const Article& rArticle,
         const int nP = rMatch.captured(2).toInt();
         // 渲染页面为图片
         const QImage image = ArticleRenderer::renderPageRef(
-            rProject, nW, nP, rContext.theme.backgroundColor, 1.0);
+            rProject, nW, nP, rContext.theme.backgroundColor, 1.0,
+            rContext.projectDirectory);
         if(image.isNull()) {
             continue;
         }
@@ -216,8 +217,10 @@ int ArticlePngExportProvider::exportArticle(const Article& rArticle,
     pDocument->drawContents(&painter);
     painter.end();
 
-    // 作者署名水印（右下角，半透明）；署名大小随图片宽度缩放
-    ExportRenderer::drawAuthorMark(image, strAuthor, image.width() / 720.0);
+    // 作者署名水印（位置/字体/字号/加粗/颜色/不透明度均取自署名设置）；
+    // 署名大小随图片宽度缩放（沿用历史基准：1080 宽 → 1.5 倍字号）
+    ExportRenderer::drawAuthorMark(image, strAuthor, rContext.authorMarkStyle,
+                                   image.width() / 720.0);
 
     // 写 PNG
     const QString strSafeName = ArticleRenderer::sanitizeFileName(rArticleTitle);
@@ -262,15 +265,20 @@ int ArticlePdfExportProvider::exportArticle(const Article& rArticle,
     QScopedPointer<QTextDocument> pDocument(
         ArticleRenderer::buildDocument(rArticle, rProject, rContext, nImageWidth));
 
-    // 作者署名：在文档末尾追加一行（字号约为正文的 3/4，颜色跟随主题）
+    // 作者署名：在文档末尾追加一行。PDF 是文本流，位置与不透明度设置不适用，
+    // 只套用字体族/字号/加粗/颜色；字号按「正文的 3/4」历史比例并随设置等比换算。
     if(!strAuthor.trimmed().isEmpty()) {
+        const AuthorMarkStyle& rStyle = rContext.authorMarkStyle;
+        const int nBodySize = qMax(16, nImageWidth * 44 / 1080);
         QTextCursor cursor(pDocument.data());
         cursor.movePosition(QTextCursor::End);
         cursor.insertBlock();
         QTextCharFormat authorFormat;
-        authorFormat.setForeground(rContext.theme.textColor);
-        QFont authorFont = pDocument->defaultFont();
-        authorFont.setPixelSize(qMax(12, authorFont.pixelSize() * 3 / 4));
+        authorFormat.setForeground(rStyle.color);
+        QFont authorFont(rStyle.resolvedFontFamily());
+        authorFont.setPixelSize(qMax(12, nBodySize * 3 / 4
+                                         * rStyle.nFontSize / AuthorMarkStyle::nDefaultFontSize));
+        authorFont.setBold(rStyle.bBold);
         authorFormat.setFont(authorFont);
         cursor.insertText(QStringLiteral("— by %1").arg(strAuthor), authorFormat);
     }

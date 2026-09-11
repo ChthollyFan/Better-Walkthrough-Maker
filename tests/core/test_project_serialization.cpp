@@ -30,6 +30,8 @@ private slots:
     void testComponentRoundtrip();
     // 旧格式（无 components 字段）读取为空组件列表
     void testLegacyFormatWithoutComponents();
+    // 页面背景图字段序列化往返一致，无背景图时不写字段
+    void testBackgroundImageRoundtrip();
 };
 
 void TestProjectSerialization::testRoundtrip()
@@ -188,6 +190,7 @@ void TestProjectSerialization::testComponentRoundtrip()
     textComponent.textData.nFontSize = 32;
     textComponent.textData.color = QColor(200, 30, 30);
     textComponent.textData.bBold = true;
+    textComponent.textData.nOpacityPercent = 55;   // 文本不透明度（project.json 持久化）
 
     Component shapeComponent;
     shapeComponent.strId = QStringLiteral("id-shape-1");
@@ -246,6 +249,7 @@ void TestProjectSerialization::testComponentRoundtrip()
     QCOMPARE(rComponents.at(1).textData.nFontSize, 32);
     QCOMPARE(rComponents.at(1).textData.color, QColor(200, 30, 30));
     QVERIFY(rComponents.at(1).textData.bBold);
+    QCOMPARE(rComponents.at(1).textData.nOpacityPercent, 55);
 
     // 形状组件
     QCOMPARE(rComponents.at(2).eType, E_COMPONENT_TYPE_SHAPE);
@@ -279,6 +283,49 @@ void TestProjectSerialization::testLegacyFormatWithoutComponents()
     QVERIFY2(ProjectSerializer::fromJson(strJson, &parsed, &strErrorMessage), qPrintable(strErrorMessage));
     QCOMPARE(parsed.vecWalkthroughs.at(0).vecPages.at(0).strName, QStringLiteral("旧页面"));
     QVERIFY(parsed.vecWalkthroughs.at(0).vecPages.at(0).vecComponents.isEmpty());
+}
+
+void TestProjectSerialization::testBackgroundImageRoundtrip()
+{
+    Project project;
+    project.strName = QStringLiteral("背景图测试");
+    Walkthrough walkthrough;
+    walkthrough.strTitle = QStringLiteral("攻略 1");
+
+    // 页面 1：带背景图（项目内相对路径）
+    Page withBackground;
+    withBackground.strName = QStringLiteral("图片页");
+    withBackground.size = QSize(1280, 720);
+    withBackground.strBackgroundImage = QStringLiteral("assets/abcd-1234.png");
+
+    // 页面 2：无背景图
+    Page withoutBackground;
+    withoutBackground.strName = QStringLiteral("空白页");
+    withoutBackground.size = QSize(1080, 1440);
+
+    walkthrough.vecPages = {withBackground, withoutBackground};
+    project.vecWalkthroughs.append(walkthrough);
+
+    const QString strJson = ProjectSerializer::toJson(project);
+    // 无背景图的页面不写该字段（可选字段，保持 JSON 精简）
+    QCOMPARE(strJson.count(QStringLiteral("backgroundImage")), 1);
+    QVERIFY(strJson.contains(QStringLiteral("assets/abcd-1234.png")));
+
+    Project parsed;
+    QString strErrorMessage;
+    QVERIFY2(ProjectSerializer::fromJson(strJson, &parsed, &strErrorMessage), qPrintable(strErrorMessage));
+    const auto& rPages = parsed.vecWalkthroughs.at(0).vecPages;
+    QCOMPARE(rPages.size(), 2);
+    QCOMPARE(rPages.at(0).strBackgroundImage, QStringLiteral("assets/abcd-1234.png"));
+    QCOMPARE(rPages.at(0).size, QSize(1280, 720));
+    QVERIFY(rPages.at(1).strBackgroundImage.isEmpty());
+
+    // 旧文件（无 backgroundImage 字段）读取为空字符串
+    const QString strLegacy = QStringLiteral(R"({
+        "walkthroughs": [ { "pages": [ { "name": "旧页", "width": 1080, "height": 1440 } ] } ]
+    })");
+    QVERIFY2(ProjectSerializer::fromJson(strLegacy, &parsed, &strErrorMessage), qPrintable(strErrorMessage));
+    QVERIFY(parsed.vecWalkthroughs.at(0).vecPages.at(0).strBackgroundImage.isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestProjectSerialization)

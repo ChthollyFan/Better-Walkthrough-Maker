@@ -5,11 +5,14 @@
  */
 #include "export/ExportRenderer.h"
 
+#include <QImage>
 #include <QPainter>
 
 #include <algorithm>
 
 #include "core/ComponentPainter.h"
+#include "core/PageBackground.h"
+#include "project/AssetStore.h"
 
 namespace bwm {
 
@@ -32,8 +35,28 @@ QVector<Component> sortedComponents(const QVector<Component>& rComponents)
     return sorted;
 }
 
+// 绘制页面背景图（等比覆盖铺满整页）；dOffsetY 为长图拼接时的纵向偏移。
+// 页面无背景图或图片加载失败时不绘制，保留已填充的主题背景色。
+void paintPageBackground(QPainter* pPainter, const Page& rPage, qreal dOffsetY,
+                         const QString& rProjectDirectory)
+{
+    if (rPage.strBackgroundImage.isEmpty()) {
+        return;
+    }
+    const QString strImagePath = AssetStore::resolvePath(rPage.strBackgroundImage,
+                                                         rProjectDirectory);
+    const QImage image(strImagePath);
+    if (image.isNull()) {
+        return;
+    }
+    PageBackground::paintCover(pPainter, image,
+                               QRectF(0, dOffsetY, rPage.size.width(), rPage.size.height()));
+}
+
 // 在指定原点绘制一页的全部组件（y 偏移用于长图拼接）
-void paintPageComponents(QPainter* pPainter, const Page& rPage, qreal dOffsetY)
+// strProjectDirectory 用于解析组件内图片的相对路径（卡片边框图片）
+void paintPageComponents(QPainter* pPainter, const Page& rPage, qreal dOffsetY,
+                         const QString& strProjectDirectory)
 {
     const QVector<Component> sorted = sortedComponents(rPage.vecComponents);
     for (const Component& rComponent : sorted) {
@@ -44,33 +67,67 @@ void paintPageComponents(QPainter* pPainter, const Page& rPage, qreal dOffsetY)
         pPainter->translate(rComponent.pos.x(), dOffsetY + rComponent.pos.y());
         pPainter->rotate(rComponent.dRotation);
         ComponentPainter::paint(pPainter, rComponent,
-                                QRectF(QPointF(0, 0), rComponent.size));
+                                QRectF(QPointF(0, 0), rComponent.size), nullptr,
+                                strProjectDirectory);
         pPainter->restore();
     }
 }
 
 } // namespace
 
-// 在图片右下角绘制作者署名（半透明）
-void ExportRenderer::drawAuthorMark(QImage& rImage, const QString& rAuthor, qreal dScale)
+// 按样式在图片指定角落绘制作者署名（支持位置/字体/字号/加粗/颜色/不透明度）
+void ExportRenderer::drawAuthorMark(QImage& rImage, const QString& rAuthor,
+                                    const AuthorMarkStyle& rStyle, qreal dScaleFactor)
 {
     if (rAuthor.trimmed().isEmpty() || rImage.isNull()) {
         return;
     }
+
+    // 字号：逻辑像素 × 缩放系数，下限 12px 保证小图上仍可辨认
+    QFont font(rStyle.resolvedFontFamily());
+    font.setPixelSize(qMax(12, qRound(rStyle.nFontSize * dScaleFactor)));
+    font.setBold(rStyle.bBold);
+
+    // 颜色：仅 RGB 存设置，不透明度在绘制时合成到 alpha
+    QColor color = rStyle.color;
+    color.setAlphaF(qBound(0, rStyle.nOpacityPercent, 100) / 100.0);
+
     QPainter painter(&rImage);
     painter.setRenderHint(QPainter::Antialiasing);
-    QFont font(QStringLiteral("Microsoft YaHei"));
-    font.setPixelSize(qMax(12, qRound(18 * dScale)));
     painter.setFont(font);
-    painter.setPen(QColor(0, 0, 0, 160));
+    painter.setPen(color);
+
+    // 内边距沿用历史值（水平 16、垂直 10 逻辑像素）并按倍率缩放；
+    // 取图片尺寸的 1/4 作为上限，避免小图上文字矩形反向导致不绘制。
+    const qreal dMarginX = qMin(16.0 * dScaleFactor, rImage.width() / 4.0);
+    const qreal dMarginY = qMin(10.0 * dScaleFactor, rImage.height() / 4.0);
     const QRectF textRect = QRectF(QPointF(0, 0), QSizeF(rImage.size()))
-                                .adjusted(0, 0, -16 * dScale, -10 * dScale);
-    painter.drawText(textRect, Qt::AlignRight | Qt::AlignBottom,
-                     QStringLiteral("by %1").arg(rAuthor));
+                                .adjusted(dMarginX, dMarginY, -dMarginX, -dMarginY);
+
+    // 四角对齐方式
+    int nAlignment = Qt::AlignLeft | Qt::AlignTop;
+    switch (rStyle.ePosition) {
+    case E_AUTHOR_MARK_POSITION_TOP_LEFT:
+        nAlignment = Qt::AlignLeft | Qt::AlignTop;
+        break;
+    case E_AUTHOR_MARK_POSITION_TOP_RIGHT:
+        nAlignment = Qt::AlignRight | Qt::AlignTop;
+        break;
+    case E_AUTHOR_MARK_POSITION_BOTTOM_LEFT:
+        nAlignment = Qt::AlignLeft | Qt::AlignBottom;
+        break;
+    case E_AUTHOR_MARK_POSITION_BOTTOM_RIGHT:
+    default:
+        nAlignment = Qt::AlignRight | Qt::AlignBottom;
+        break;
+    }
+
+    painter.drawText(textRect, nAlignment, QStringLiteral("by %1").arg(rAuthor));
 }
 
 QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor& rBackground,
-                                  const QString& rAuthor)
+                                  const QString& rAuthor, const QString& rProjectDirectory,
+                                  const AuthorMarkStyle& rAuthorStyle)
 {
     const int nWidth = qMax(1, qRound(rPage.size.width() * dScale));
     const int nHeight = qMax(1, qRound(rPage.size.height() * dScale));
@@ -81,16 +138,20 @@ QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor&
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
     painter.scale(dScale, dScale);
-    paintPageComponents(&painter, rPage, 0);
+    // 先铺页面背景图，再画组件（与画布层序一致：背景图在最底）
+    paintPageBackground(&painter, rPage, 0, rProjectDirectory);
+    paintPageComponents(&painter, rPage, 0, rProjectDirectory);
     painter.end();
 
-    drawAuthorMark(image, rAuthor, dScale);
+    // 署名水印按导出倍率缩放（与页面内容同步放大）
+    drawAuthorMark(image, rAuthor, rAuthorStyle, dScale);
     return image;
 }
 
 QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale, bool bSeparator,
                                        QString* pErrorMessage, const QColor& rBackground,
-                                       const QString& rAuthor)
+                                       const QString& rAuthor, const QString& rProjectDirectory,
+                                       const AuthorMarkStyle& rAuthorStyle)
 {
     if (rPages.isEmpty()) {
         return QImage();
@@ -129,7 +190,8 @@ QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale
         const Page& rPage = rPages.at(nIndex);
         // 页面背景（宽度不足最大宽时补背景色）
         painter.fillRect(QRectF(0, dOffsetY, nWidth, rPage.size.height()), rBackground);
-        paintPageComponents(&painter, rPage, dOffsetY);
+        paintPageBackground(&painter, rPage, dOffsetY, rProjectDirectory);
+        paintPageComponents(&painter, rPage, dOffsetY, rProjectDirectory);
         dOffsetY += rPage.size.height();
         if (bSeparator && nIndex < rPages.size() - 1) {
             painter.fillRect(QRectF(0, dOffsetY, nWidth, nSeparatorHeight), QColor(200, 200, 200));
@@ -138,7 +200,8 @@ QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale
     }
     painter.end();
 
-    drawAuthorMark(image, rAuthor, dScale);
+    // 署名水印按导出倍率缩放
+    drawAuthorMark(image, rAuthor, rAuthorStyle, dScale);
     return image;
 }
 

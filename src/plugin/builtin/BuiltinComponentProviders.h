@@ -103,6 +103,10 @@ public:
     QString displayName() const override;
     QString menuPath() const override;
     Component createComponent(const PluginContext& rContext) const override;
+    // 仅卡片边框需要：插入前弹对话框选形状（矩形/正方形/圆形/椭圆）与颜色
+    bool requiresInputDialog() const override;
+    bool showInputDialog(QWidget* pParent, Component& rComponent,
+                         const PluginContext& rContext) const override;
 
 private:
     E_STICKER_TYPE m_eStickerType;   ///< 贴纸子类型

@@ -38,6 +38,13 @@ public:
     // 数据访问与同步
     Component component() const { return m_component; }
     void setComponent(const Component& rComponent);
+    // 组件数据变更的**统一入口**（编辑对话框确认后调用）：
+    // 更新数据 + 让图片缓存按新路径失效重载 + 重绘。
+    // 任何会改动图片路径的编辑都必须走这里，否则画布会继续显示旧图。
+    void applyComponentData(const Component& rComponent);
+
+    // 项目目录：用于解析卡片边框图片的相对路径（由 CanvasScene 注入）
+    void setProjectDirectory(const QString& strDir);
 
     // 双击编辑（文本/表格组件编辑内容）
     void editContent();
@@ -69,6 +76,12 @@ private:
     void editTextContent();
     void editTableContent();
     void editStickerContent();
+    // 卡片边框：弹专用对话框改形状（矩形/正方形/圆形/椭圆）、颜色与框内图片
+    void editCardBorder();
+    // 组件用到的图片路径（图片组件取 imageData，卡片边框取框内图片；已解析为绝对路径）
+    QString componentImagePath(const Component& rComponent) const;
+    // 图片路径变化时重新加载缓存
+    void refreshImageCache();
     qreal handleHitRadius() const;
 
     Component m_component;                    // 组件数据副本
@@ -78,7 +91,9 @@ private:
     QPointF m_pressMouseLocal;                // 按下时鼠标在组件内的局部坐标
     qreal m_dRotateStartAngle = 0;            // 旋转起始角
     QPointF m_pressMouseScene;                // 按下时鼠标场景坐标
-    QImage m_imageCache;                      // 图片组件缓存（避免重复加载）
+    QImage m_imageCache;                      // 图片缓存（图片组件与卡片边框图片共用）
+    QString m_strCachedImagePath;             // 缓存对应的图片路径（变化时重载）
+    QString m_strProjectDirectory;            // 项目目录（解析卡片边框图片相对路径）
     // 多选拖拽：其余选中组件的起始位置（仅拖动按下组件时联动）
     QVector<ComponentItem*> m_vecDragItems;
     QVector<QPointF> m_vecDragStartPos;

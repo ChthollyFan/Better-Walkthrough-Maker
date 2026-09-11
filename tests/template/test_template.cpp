@@ -24,6 +24,8 @@ private slots:
     void testBuiltinTemplates();
     // 模板解析失败返回错误
     void testInvalidJson();
+    // 页面背景图随模板一起保存与读回
+    void testBackgroundImageRoundtrip();
 };
 
 void TestTemplate::testRoundtrip()
@@ -116,6 +118,33 @@ void TestTemplate::testInvalidJson()
     QString strErrorMessage;
     QVERIFY(!TemplateSerializer::fromJson(QStringLiteral("这不是 JSON {{{"), &parsed, &strErrorMessage));
     QVERIFY(!strErrorMessage.isEmpty());
+}
+
+void TestTemplate::testBackgroundImageRoundtrip()
+{
+    Template t;
+    t.strName = QStringLiteral("图片模板");
+    t.eType = E_WALKTHROUGH_TYPE_MAP_POINTS;
+    Page page;
+    page.strName = QStringLiteral("地图页");
+    page.size = QSize(1920, 1080);
+    page.strBackgroundImage = QStringLiteral("assets/map.png");
+    t.vecPages.append(page);
+
+    const QString strJson = TemplateSerializer::toJson(t);
+    Template parsed;
+    QString strErrorMessage;
+    QVERIFY2(TemplateSerializer::fromJson(strJson, &parsed, &strErrorMessage), qPrintable(strErrorMessage));
+    QCOMPARE(parsed.vecPages.at(0).strBackgroundImage, QStringLiteral("assets/map.png"));
+    QCOMPARE(parsed.vecPages.at(0).size, QSize(1920, 1080));
+
+    // 旧模板（无该字段）读取为空
+    const QString strLegacy = QStringLiteral(R"({
+        "formatVersion": 1, "name": "旧模板", "type": "cover",
+        "pages": [ { "name": "页面", "width": 1080, "height": 1440 } ]
+    })");
+    QVERIFY2(TemplateSerializer::fromJson(strLegacy, &parsed, &strErrorMessage), qPrintable(strErrorMessage));
+    QVERIFY(parsed.vecPages.at(0).strBackgroundImage.isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestTemplate)

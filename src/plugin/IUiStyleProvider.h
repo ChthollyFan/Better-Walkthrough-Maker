@@ -16,9 +16,11 @@
 #ifndef BWM_PLUGIN_IUISTYLEPROVIDER_H
 #define BWM_PLUGIN_IUISTYLEPROVIDER_H
 
+#include <QColor>
 #include <QString>
 #include <QVector>
 
+class QPainter;
 class QWidget;
 
 namespace bwm {
@@ -30,7 +32,7 @@ namespace bwm {
  * bRequiresNativeApi 标记是否依赖平台原生 API（影响非 Windows 平台可用性）。
  */
 struct UiStyleDescriptor {
-    QString strId;              ///< 风格唯一标识（如 "acrylic-dark"）
+    QString strId;              ///< 风格唯一标识（如 "dark" / "light" / "auto"）
     QString strDisplayName;     ///< 菜单显示名（如 "深色亚克力"）
     bool bRequiresNativeApi = false; ///< 是否依赖平台原生 API
 };
@@ -65,6 +67,42 @@ public:
      * @return 是否应用成功（如原生 API 不可用应返回 false，由框架回退到 system）
      */
     virtual bool applyStyle(const QString& strStyleId, QWidget* pMainWindow) const = 0;
+
+    /**
+     * @brief 绘制窗口背景（可选钩子，默认不绘制）。
+     *
+     * 框架在窗口 paintEvent 中调用，允许风格绘制自定义窗口背景——例如玻璃拟态
+     * 风格的彩色渐变底。默认实现返回 false，框架回退到 Qt 默认绘制，
+     * 因此不关心窗口背景的风格实现无需重写本方法。
+     *
+     * @param strStyleId   当前风格 id（styles() 中某项的 strId）
+     * @param pMainWindow  目标主窗口
+     * @param rPainter     已绑定到主窗口的画笔
+     * @return true 表示已绘制背景；false 表示未处理
+     */
+    virtual bool paintBackground(const QString& strStyleId, QWidget* pMainWindow,
+                                 QPainter& rPainter) const
+    {
+        Q_UNUSED(strStyleId)
+        Q_UNUSED(pMainWindow)
+        Q_UNUSED(rPainter)
+        return false;
+    }
+
+    /**
+     * @brief 画布区域背景色（可选钩子，默认不干预）。
+     *
+     * 玻璃风格通常返回全透明色，让窗口渐变透上来到画布区域，
+     * 使画布中的页面像"浮"在玻璃上。
+     *
+     * @param strStyleId  当前风格 id
+     * @return 有效颜色表示需应用到画布视口；无效 QColor() 表示保持画布默认背景
+     */
+    virtual QColor canvasBackgroundColor(const QString& strStyleId) const
+    {
+        Q_UNUSED(strStyleId)
+        return QColor();
+    }
 };
 
 } // namespace bwm

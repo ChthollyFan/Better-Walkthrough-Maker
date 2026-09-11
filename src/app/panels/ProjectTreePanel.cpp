@@ -12,6 +12,7 @@
 
 #include "core/Article.h"
 #include "export/ArticleImporter.h"
+#include "project/AssetStore.h"
 #include "project/ProjectManager.h"
 #include "plugin/PluginHost.h"
 #include "plugin/ITemplateProvider.h"
@@ -22,6 +23,8 @@
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QImage>
+#include <QImageReader>
 #include <QInputDialog>
 #include <QListWidget>
 #include <QListWidgetItem>
@@ -35,6 +38,39 @@
 #include <QVBoxLayout>
 
 namespace bwm {
+
+namespace {
+
+// 图片文件过滤器（与图片组件、素材库保持一致）
+const QString kImageFilter = QStringLiteral("图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.gif)");
+
+// 单页边长上限：与 ProjectSerializer / TemplateSerializer 的解析防线保持一致。
+// 超过该值的尺寸在读回时会被回退成默认尺寸，因此导入时先等比缩小。
+constexpr int kMaxPageDimension = 16384;
+
+// 图片原始尺寸 → 页面尺寸：超上限时等比缩小，保证序列化往返不丢尺寸
+QSize clampedPageSize(const QSize& rImageSize)
+{
+    if (rImageSize.width() <= kMaxPageDimension && rImageSize.height() <= kMaxPageDimension) {
+        return rImageSize;
+    }
+    return rImageSize.scaled(kMaxPageDimension, kMaxPageDimension, Qt::KeepAspectRatio);
+}
+
+// 读取图片尺寸：先只读文件头（避免整张大图进内存）；
+// 个别格式头部读不到尺寸时回退为完整加载。返回无效尺寸表示无法读取。
+QSize readImageSize(const QString& strFilePath)
+{
+    QImageReader reader(strFilePath);
+    QSize imageSize = reader.size();
+    if (!imageSize.isValid()) {
+        const QImage image(strFilePath);
+        imageSize = image.size();
+    }
+    return imageSize;
+}
+
+} // namespace
 
 ProjectTreePanel::ProjectTreePanel(QWidget* pParent, ProjectManager* pProjectManager,
                                    PluginHost* pHost)
@@ -156,8 +192,11 @@ void ProjectTreePanel::onContextMenu(const QPoint& rPos)
     QMenu menu(this);
     QAction* pAddWalkthroughAction = nullptr;
     QAction* pAddPageAction = nullptr;
+    QAction* pAddPageFromImageAction = nullptr;
     QAction* pAddArticleAction = nullptr;
     QAction* pImportArticleAction = nullptr;
+    QAction* pSetPageBackgroundAction = nullptr;
+    QAction* pClearPageBackgroundAction = nullptr;
     QAction* pRenameAction = nullptr;
     QAction* pDeleteAction = nullptr;
     if(strKey.isEmpty()) {
@@ -170,6 +209,7 @@ void ProjectTreePanel::onContextMenu(const QPoint& rPos)
     } else if(!strKey.contains(QLatin1Char(':'))) {
         // 攻略节点
         pAddPageAction = menu.addAction(QStringLiteral("新建页面…"));
+        pAddPageFromImageAction = menu.addAction(QStringLiteral("从图片新建页面…"));
         pAddArticleAction = menu.addAction(QStringLiteral("新建文章…"));
         pImportArticleAction = menu.addAction(QStringLiteral("从文件导入文章…"));
         menu.addSeparator();
@@ -179,6 +219,9 @@ void ProjectTreePanel::onContextMenu(const QPoint& rPos)
         // 页面节点
         pRenameAction = menu.addAction(QStringLiteral("重命名页面…"));
         pDeleteAction = menu.addAction(QStringLiteral("删除页面…"));
+        menu.addSeparator();
+        pSetPageBackgroundAction = menu.addAction(QStringLiteral("设置背景图…"));
+        pClearPageBackgroundAction = menu.addAction(QStringLiteral("清除背景图"));
     }
     QAction* pChosen = menu.exec(m_pTree->viewport()->mapToGlobal(rPos));
     if(!pChosen) {
@@ -188,6 +231,12 @@ void ProjectTreePanel::onContextMenu(const QPoint& rPos)
         onAddWalkthrough();
     } else if(pChosen == pAddPageAction) {
         onAddPage();
+    } else if(pChosen == pAddPageFromImageAction) {
+        onAddPageFromImage();
+    } else if(pChosen == pSetPageBackgroundAction) {
+        onSetPageBackground();
+    } else if(pChosen == pClearPageBackgroundAction) {
+        onClearPageBackground();
     } else if(pChosen == pAddArticleAction) {
         onAddArticle();
     } else if(pChosen == pImportArticleAction) {
@@ -338,6 +387,168 @@ void ProjectTreePanel::onAddPage()
     m_pProjectManager->setDirty();
     rebuildProjectTree();
     selectNodeByKey(QStringLiteral("%1:%2").arg(nWalkthroughIndex).arg(rWalkthrough.vecPages.size() - 1));
+    emit projectStructureChanged();
+}
+
+void ProjectTreePanel::onAddPageFromImage()
+{
+    Project* pProject = m_pProjectManager->project();
+    if(!pProject) {
+        return;
+    }
+    // 目标攻略：当前选中的攻略节点（或其子节点）
+    const QString strKey = selectedNodeKey();
+    if(strKey.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("从图片新建页面"),
+                                 QStringLiteral("请先选中一个攻略"));
+        return;
+    }
+    const int nWalkthroughIndex = strKey.split(QLatin1Char(':')).at(0).toInt();
+    if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        return;
+    }
+    Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+
+    const QString strFilePath = QFileDialog::getOpenFileName(
+        this, QStringLiteral("选择图片作为页面"), QString(), kImageFilter);
+    if(strFilePath.isEmpty()) {
+        return;   // 用户取消
+    }
+
+    const QSize imageSize = readImageSize(strFilePath);
+    if(!imageSize.isValid()) {
+        QMessageBox::critical(this, QStringLiteral("从图片新建页面"),
+                              QStringLiteral("无法读取图片（文件可能已损坏或格式不受支持）：\n%1")
+                                  .arg(strFilePath));
+        return;
+    }
+
+    // 复制进项目 assets/（项目自包含），并记录为项目内相对路径
+    const QString strProjectDir = m_pProjectManager->projectDirectory();
+    QString strErrorMessage;
+    const QString strImportedPath = AssetStore::importImage(strFilePath, strProjectDir,
+                                                            &strErrorMessage);
+    if(strImportedPath.isEmpty()) {
+        QMessageBox::critical(this, QStringLiteral("从图片新建页面"), strErrorMessage);
+        return;
+    }
+
+    Page page;
+    page.strName = QStringLiteral("页面 %1").arg(rWalkthrough.vecPages.size() + 1);
+    // 页面尺寸取图片原始像素尺寸：背景图等比覆盖后正好铺满整页，既不裁剪也不变形
+    page.size = clampedPageSize(imageSize);
+    page.strBackgroundImage = AssetStore::toProjectRelative(strImportedPath, strProjectDir);
+    rWalkthrough.vecPages.append(page);
+
+    m_pProjectManager->setDirty();
+    rebuildProjectTree();
+    selectNodeByKey(QStringLiteral("%1:%2").arg(nWalkthroughIndex)
+                        .arg(rWalkthrough.vecPages.size() - 1));
+    emit projectStructureChanged();
+    emit assetsChanged();   // 图片已复制进 assets/，通知素材库刷新
+}
+
+Page* ProjectTreePanel::pageByKey(const QString& strKey)
+{
+    Project* pProject = m_pProjectManager->project();
+    // 仅处理页面键（"W:P"）：项目键、攻略键、文章键（含 ":A"）一律返回空
+    if(!pProject || strKey.isEmpty() || strKey.contains(QStringLiteral(":A"))) {
+        return nullptr;
+    }
+    const QStringList parts = strKey.split(QLatin1Char(':'));
+    if(parts.size() != 2) {
+        return nullptr;
+    }
+    const int nWalkthroughIndex = parts.at(0).toInt();
+    const int nPageIndex = parts.at(1).toInt();
+    if(nWalkthroughIndex < 0 || nWalkthroughIndex >= pProject->vecWalkthroughs.size()) {
+        return nullptr;
+    }
+    Walkthrough& rWalkthrough = pProject->vecWalkthroughs[nWalkthroughIndex];
+    if(nPageIndex < 0 || nPageIndex >= rWalkthrough.vecPages.size()) {
+        return nullptr;
+    }
+    return &rWalkthrough.vecPages[nPageIndex];
+}
+
+void ProjectTreePanel::onSetPageBackground()
+{
+    Page* pPage = pageByKey(selectedPageKey());
+    if(!pPage) {
+        QMessageBox::information(this, QStringLiteral("设置背景图"),
+                                 QStringLiteral("请先选中一个页面"));
+        return;
+    }
+
+    const QString strFilePath = QFileDialog::getOpenFileName(
+        this, QStringLiteral("选择背景图"), QString(), kImageFilter);
+    if(strFilePath.isEmpty()) {
+        return;   // 用户取消
+    }
+
+    const QSize imageSize = readImageSize(strFilePath);
+    if(!imageSize.isValid()) {
+        QMessageBox::critical(this, QStringLiteral("设置背景图"),
+                              QStringLiteral("无法读取图片（文件可能已损坏或格式不受支持）：\n%1")
+                                  .arg(strFilePath));
+        return;
+    }
+
+    const QString strProjectDir = m_pProjectManager->projectDirectory();
+    QString strErrorMessage;
+    const QString strImportedPath = AssetStore::importImage(strFilePath, strProjectDir,
+                                                            &strErrorMessage);
+    if(strImportedPath.isEmpty()) {
+        QMessageBox::critical(this, QStringLiteral("设置背景图"), strErrorMessage);
+        return;
+    }
+
+    // 页面尺寸与图片比例不一致时背景图会被裁剪，询问是否同步调整页面尺寸
+    const QSize imagePageSize = clampedPageSize(imageSize);
+    if(imagePageSize != pPage->size) {
+        const QMessageBox::StandardButton eAnswer = QMessageBox::question(
+            this, QStringLiteral("设置背景图"),
+            QStringLiteral("图片尺寸为 %1 × %2，当前页面尺寸为 %3 × %4。\n\n"
+                           "是否把页面尺寸调整为图片尺寸？\n"
+                           "选「否」则保持页面尺寸，背景图会等比裁剪以铺满整页。")
+                .arg(imagePageSize.width()).arg(imagePageSize.height())
+                .arg(pPage->size.width()).arg(pPage->size.height()),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+        if(eAnswer == QMessageBox::Yes) {
+            pPage->size = imagePageSize;
+        }
+    }
+
+    pPage->strBackgroundImage = AssetStore::toProjectRelative(strImportedPath, strProjectDir);
+    m_pProjectManager->setDirty();
+    // 页面可能改了尺寸，通知 MainWindow 重新加载画布并自适应
+    emit projectStructureChanged();
+    emit assetsChanged();   // 图片已复制进 assets/，通知素材库刷新
+}
+
+void ProjectTreePanel::onClearPageBackground()
+{
+    Page* pPage = pageByKey(selectedPageKey());
+    if(!pPage) {
+        QMessageBox::information(this, QStringLiteral("清除背景图"),
+                                 QStringLiteral("请先选中一个页面"));
+        return;
+    }
+    if(pPage->strBackgroundImage.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("清除背景图"),
+                                 QStringLiteral("当前页面没有背景图"));
+        return;
+    }
+    if(QMessageBox::question(this, QStringLiteral("清除背景图"),
+                             QStringLiteral("确定清除页面「%1」的背景图？\n"
+                                            "（素材文件仍保留在素材库中，可在素材面板删除）")
+                                 .arg(pPage->strName),
+                             QMessageBox::Yes | QMessageBox::No,
+                             QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+    pPage->strBackgroundImage.clear();
+    m_pProjectManager->setDirty();
     emit projectStructureChanged();
 }
 
