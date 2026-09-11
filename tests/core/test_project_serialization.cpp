@@ -190,6 +190,7 @@ void TestProjectSerialization::testComponentRoundtrip()
     textComponent.textData.nFontSize = 32;
     textComponent.textData.color = QColor(200, 30, 30);
     textComponent.textData.bBold = true;
+    textComponent.textData.nOpacityPercent = 55;   // 文本不透明度（project.json 持久化）
 
     Component shapeComponent;
     shapeComponent.strId = QStringLiteral("id-shape-1");
@@ -248,6 +249,7 @@ void TestProjectSerialization::testComponentRoundtrip()
     QCOMPARE(rComponents.at(1).textData.nFontSize, 32);
     QCOMPARE(rComponents.at(1).textData.color, QColor(200, 30, 30));
     QVERIFY(rComponents.at(1).textData.bBold);
+    QCOMPARE(rComponents.at(1).textData.nOpacityPercent, 55);
 
     // 形状组件
     QCOMPARE(rComponents.at(2).eType, E_COMPONENT_TYPE_SHAPE);

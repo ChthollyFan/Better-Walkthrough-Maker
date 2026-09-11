@@ -10,12 +10,11 @@
 #include "plugin/builtin/BuiltinComponentProviders.h"
 
 #include "plugin/builtin/CardBorderDialog.h"
+#include "plugin/builtin/TextStyleDialog.h"
 #include "project/AssetStore.h"
 #include "settings/Settings.h"
 
 #include <QFileDialog>
-#include <QInputDialog>
-#include <QLineEdit>
 
 namespace bwm {
 
@@ -110,17 +109,14 @@ bool TextComponentProvider::showInputDialog(QWidget* pParent, Component& rCompon
                                             const PluginContext& rContext) const
 {
     (void)rContext;
-    // TODO 插入→文本 目前只输入内容，字号/颜色/字体需插入后再双击组件编辑。
-    // 后续应改为「内容 + 字体样式」对话框，直接复用 ui/FontSelectWidget
-    // （见 docs/project-plan.md 8.2 后续待办）。
-    bool bOk = false;
-    const QString strContent = QInputDialog::getText(
-        pParent, QStringLiteral("插入文本"), QStringLiteral("文本内容："),
-        QLineEdit::Normal, QStringLiteral("攻略文本"), &bOk);
-    if(!bOk) {
+    // 文本样式对话框：内容 + 对齐 + 字体/字号/加粗/颜色/不透明度。
+    // 与「双击编辑文本」共用 TextStyleDialog，插入时即可完成样式设置，
+    // 不必再「插入后双击组件」二次修改。
+    TextStyleDialog dialog(pParent, rComponent.textData);
+    if(dialog.exec() != QDialog::Accepted) {
         return false;   // 用户取消
     }
-    rComponent.textData.strContent = strContent;
+    rComponent.textData = dialog.textData();
     return true;
 }
 

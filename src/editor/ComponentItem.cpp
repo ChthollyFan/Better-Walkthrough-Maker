@@ -5,33 +5,26 @@
  */
 #include "editor/ComponentItem.h"
 
-#include <QCheckBox>
-#include <QClipboard>
+#include <QClipboard>   // 表格编辑：粘贴剪贴板 CSV
 #include <QColorDialog>
-#include <QComboBox>
 #include <QCursor>
 #include <QDialog>
 #include <QDialogButtonBox>
-#include <QFormLayout>
 #include <QGraphicsSceneMouseEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
-#include <QIcon>
-#include <QLineEdit>
 #include <QPainter>
 #include <QPainterPath>
-#include <QPixmap>
 #include <QPushButton>
-#include <QSpinBox>
 #include <QTableWidget>
-#include <QToolButton>
 #include <QVBoxLayout>
 #include <QtMath>
 
 #include "editor/CanvasScene.h"
 #include "core/ComponentPainter.h"
 #include "plugin/builtin/CardBorderDialog.h"
+#include "plugin/builtin/TextStyleDialog.h"
 #include "project/AssetStore.h"
 
 namespace bwm {
@@ -42,18 +35,6 @@ constexpr qreal dHandleSize = 8;          // 手柄边长
 constexpr qreal dRotateHandleOffset = 24; // 旋转手柄距组件顶部的距离
 constexpr qreal dMinSize = 8;             // 组件最小边长
 constexpr qreal dHandleHitRadius = 6;     // 手柄命中半径
-
-// 生成一个带边框的色块图标（颜色预览用）。
-QIcon colorSwatchIcon(const QColor& rColor)
-{
-    QPixmap pixmap(16, 16);
-    pixmap.fill(rColor);
-    QPainter painter(&pixmap);
-    painter.setPen(QPen(QColor(120, 120, 120), 1));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawRect(0, 0, pixmap.width() - 1, pixmap.height() - 1);
-    return QIcon(pixmap);
-}
 
 } // namespace
 
@@ -484,73 +465,14 @@ void ComponentItem::editTextContent()
 {
     emit editStarted();
 
-    // 文本样式编辑对话框：内容 / 字号 / 颜色 / 加粗 / 对齐
-    QDialog dialog;
-    dialog.setWindowTitle(QStringLiteral("编辑文本"));
-    auto* pFormLayout = new QFormLayout(&dialog);
-
-    auto* pContentEdit = new QLineEdit(&dialog);
-    pContentEdit->setText(m_component.textData.strContent);
-    pFormLayout->addRow(QStringLiteral("内容："), pContentEdit);
-
-    auto* pFontSizeSpin = new QSpinBox(&dialog);
-    pFontSizeSpin->setRange(6, 400);
-    pFontSizeSpin->setValue(m_component.textData.nFontSize);
-    pFormLayout->addRow(QStringLiteral("字号："), pFontSizeSpin);
-
-    auto* pBoldCheck = new QCheckBox(QStringLiteral("加粗"), &dialog);
-    pBoldCheck->setChecked(m_component.textData.bBold);
-    pFormLayout->addRow(QStringLiteral("样式："), pBoldCheck);
-
-    auto* pAlignCombo = new QComboBox(&dialog);
-    pAlignCombo->addItem(QStringLiteral("左对齐"), int(Qt::AlignLeft | Qt::AlignVCenter));
-    pAlignCombo->addItem(QStringLiteral("居中"), int(Qt::AlignHCenter | Qt::AlignVCenter));
-    pAlignCombo->addItem(QStringLiteral("右对齐"), int(Qt::AlignRight | Qt::AlignVCenter));
-    pAlignCombo->addItem(QStringLiteral("两端对齐"), int(Qt::AlignJustify | Qt::AlignVCenter));
-    const int nCurrentAlign = m_component.textData.nAlign;
-    int nAlignIndex = 0;
-    for (int nIndex = 0; nIndex < pAlignCombo->count(); ++nIndex) {
-        if (pAlignCombo->itemData(nIndex).toInt() == nCurrentAlign) {
-            nAlignIndex = nIndex;
-            break;
-        }
-    }
-    pAlignCombo->setCurrentIndex(nAlignIndex);
-    pFormLayout->addRow(QStringLiteral("对齐："), pAlignCombo);
-
-    auto* pColorButton = new QToolButton(&dialog);
-    QColor color = m_component.textData.color;
-    // 按钮：正常外观 + 一个色块图标预览当前颜色（避免整块变色）
-    const auto updateColorButton = [pColorButton](const QColor& rColor) {
-        pColorButton->setText(QStringLiteral("选择颜色"));
-        pColorButton->setIcon(colorSwatchIcon(rColor));
-        pColorButton->setIconSize(QSize(16, 16));
-    };
-    updateColorButton(color);
-    connect(pColorButton, &QToolButton::clicked, &dialog, [pColorButton, &color, updateColorButton]() {
-        const QColor chosen = QColorDialog::getColor(color, pColorButton, QStringLiteral("选择文字颜色"));
-        if (chosen.isValid()) {
-            color = chosen;
-            updateColorButton(chosen);
-        }
-    });
-    pFormLayout->addRow(QStringLiteral("颜色："), pColorButton);
-
-    auto* pButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    pButtons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确定"));
-    pButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-    connect(pButtons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(pButtons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    pFormLayout->addRow(pButtons);
-
+    // 文本样式对话框（内容 / 对齐 / 字体 / 字号 / 加粗 / 颜色 / 不透明度）：
+    // 与「插入 → 文本」共用 TextStyleDialog，避免插入与编辑两处 UI 不一致
+    TextStyleDialog dialog(nullptr, m_component.textData);
     if (dialog.exec() == QDialog::Accepted) {
-        m_component.textData.strContent = pContentEdit->text();
-        m_component.textData.nFontSize = pFontSizeSpin->value();
-        m_component.textData.bBold = pBoldCheck->isChecked();
-        m_component.textData.nAlign = pAlignCombo->currentData().toInt();
-        m_component.textData.color = color;
-        prepareGeometryChange();
-        update();
+        Component updated = m_component;
+        updated.textData = dialog.textData();
+        // 统一走数据变更入口（更新数据 + 刷新缓存 + 重绘）
+        applyComponentData(updated);
         emit geometryChanged();
     }
 

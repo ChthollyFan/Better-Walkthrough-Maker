@@ -9,11 +9,13 @@ set(TEST_SOURCES
   core/test_project_serialization.cpp
   core/test_project_manager.cpp
   core/test_article.cpp
+  core/test_text_style.cpp
   export/test_article_export.cpp
   export/test_export_renderer.cpp
   template/test_template.cpp
   ui/test_font_select_widget.cpp
   plugin/builtin/test_card_border_dialog.cpp
+  plugin/builtin/test_text_style_dialog.cpp
 )
 
 foreach(test_source IN LISTS TEST_SOURCES)

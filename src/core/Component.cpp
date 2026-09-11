@@ -145,7 +145,8 @@ E_CARD_BORDER_SHAPE cardBorderShapeFromString(const QString& strShape)
 
 QString colorToString(const QColor& rColor)
 {
-    // 统一输出 #RRGGBB（不支持透明时省略 alpha；M2 范围无透明度需求）
+    // 统一输出 #RRGGBB：颜色不存 alpha（兼容旧文件），
+    // 需要透明度的组件（文本、署名水印）另用单独字段表示
     return rColor.name(QColor::HexRgb);
 }
 
@@ -153,6 +154,13 @@ QColor colorFromString(const QString& strColor)
 {
     const QColor color(strColor);
     return color.isValid() ? color : QColor(Qt::black);
+}
+
+QString textDefaultFontFamily()
+{
+    // 默认字体族：历史上硬编码在 ComponentPainter，现收敛到此处，
+    // 供绘制与「文本样式」设置界面共用，避免两处默认值不一致
+    return QStringLiteral("Microsoft YaHei");
 }
 
 } // namespace bwm

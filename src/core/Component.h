@@ -62,9 +62,12 @@ struct TextData {
     QString strContent;                    // 文本内容
     QString strFontFamily;                 // 字体
     int nFontSize = 24;                    // 字号
-    QColor color = QColor(Qt::black);      // 文字颜色
+    QColor color = QColor(Qt::black);      // 文字颜色（仅 RGB，透明度见 nOpacityPercent）
     bool bBold = false;                    // 加粗
     int nAlign = Qt::AlignLeft;            // 对齐方式（Qt::Alignment 的 int 形式，便于序列化）
+    // 不透明度（0~100）；100 = 完全不透明。颜色只存 #RRGGBB，
+    // 透明度单列存储（colorToString 不保留 alpha），绘制时合成到颜色 alpha。
+    int nOpacityPercent = 100;
 };
 
 // 形状组件数据
@@ -132,6 +135,8 @@ QString cardBorderShapeToString(E_CARD_BORDER_SHAPE eShape);
 E_CARD_BORDER_SHAPE cardBorderShapeFromString(const QString& strShape);
 QString colorToString(const QColor& rColor);
 QColor colorFromString(const QString& strColor);
+// 文本组件默认字体族（TextData::strFontFamily 为空时使用）；绘制与设置界面共用同一来源
+QString textDefaultFontFamily();
 
 // 相等比较（快照撤销、脏检测等场景使用）
 inline bool operator==(const ImageData& rLeft, const ImageData& rRight)
@@ -146,7 +151,8 @@ inline bool operator==(const TextData& rLeft, const TextData& rRight)
         && rLeft.nFontSize == rRight.nFontSize
         && rLeft.color == rRight.color
         && rLeft.bBold == rRight.bBold
-        && rLeft.nAlign == rRight.nAlign;
+        && rLeft.nAlign == rRight.nAlign
+        && rLeft.nOpacityPercent == rRight.nOpacityPercent;
 }
 
 inline bool operator==(const ShapeData& rLeft, const ShapeData& rRight)

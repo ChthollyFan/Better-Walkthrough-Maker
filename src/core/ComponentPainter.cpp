@@ -94,11 +94,14 @@ void ComponentPainter::paint(QPainter* pPainter, const Component& rComponent,
 
     if (rComponent.eType == E_COMPONENT_TYPE_TEXT) {
         const TextData& rText = rComponent.textData;
-        QFont font(rText.strFontFamily.isEmpty() ? QStringLiteral("Microsoft YaHei") : rText.strFontFamily);
+        QFont font(rText.strFontFamily.isEmpty() ? textDefaultFontFamily() : rText.strFontFamily);
         font.setPixelSize(rText.nFontSize);
         font.setBold(rText.bBold);
         pPainter->setFont(font);
-        pPainter->setPen(rText.color);
+        // 不透明度：颜色只存 RGB，绘制时把 nOpacityPercent 合成到 alpha
+        QColor textColor = rText.color;
+        textColor.setAlphaF(qBound(0, rText.nOpacityPercent, 100) / 100.0);
+        pPainter->setPen(textColor);
         pPainter->drawText(rContentRect, rText.nAlign, rText.strContent);
         return;
     }

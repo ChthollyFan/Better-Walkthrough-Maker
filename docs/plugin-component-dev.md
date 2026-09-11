@@ -147,6 +147,29 @@ plugin/builtin/MyComponentProvider.cpp
 
 > **讨论点**：与用户确认渲染方式——是用 QPainter 程序绘制，还是加载图片资源。
 
+### 步骤七：需要用户输入 / 样式设置时复用现有对话框
+
+`showInputDialog()` 里需要让用户输入文字并设置字体、颜色等样式时，**不要自己再堆一遍控件**，
+直接复用现有对话框与可复用控件：
+
+- `plugin/builtin/TextStyleDialog`：文本内容 + 对齐 + `ui/FontSelectWidget`
+  （字体族 / 字号 / 加粗 / 颜色 / 不透明度 + 预览）。「插入 → 文本」与「双击编辑文本」共用它：
+
+  ```cpp
+  TextStyleDialog dialog(pParent, rComponent.textData);
+  if (dialog.exec() != QDialog::Accepted) {
+      return false;   // 用户取消
+  }
+  rComponent.textData = dialog.textData();
+  return true;
+  ```
+
+- `plugin/builtin/CardBorderDialog`：卡片边框形状 + 颜色 + 框内图片与取景。
+- `ui/FontSelectWidget`：只需要字体相关控件时单独嵌入（支持行显隐与真实字体预览）。
+
+> 约定：这类对话框放在 `plugin/builtin/` 层，因为 core 层的插入流程与 app 层的编辑流程都要调用；
+> 新组件需要专有样式对话框时请按同样方式组织，避免同一功能出现两套 UI。
+
 ## 4. 验证清单
 
 - [ ] 编译通过（`cmake --build build`）

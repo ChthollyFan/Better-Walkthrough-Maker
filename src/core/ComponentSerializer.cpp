@@ -37,6 +37,7 @@ QJsonObject ComponentSerializer::toJson(const Component& rComponent)
         textObject.insert(QStringLiteral("color"), colorToString(rComponent.textData.color));
         textObject.insert(QStringLiteral("bold"), rComponent.textData.bBold);
         textObject.insert(QStringLiteral("align"), rComponent.textData.nAlign);
+        textObject.insert(QStringLiteral("opacity"), rComponent.textData.nOpacityPercent);
         componentObject.insert(QStringLiteral("text"), textObject);
     } else if (rComponent.eType == E_COMPONENT_TYPE_TABLE) {
         QJsonObject tableObject;
@@ -119,6 +120,9 @@ Component ComponentSerializer::fromJson(const QJsonObject& rComponentObject)
     component.textData.color = colorFromString(textObject.value(QStringLiteral("color")).toString());
     component.textData.bBold = textObject.value(QStringLiteral("bold")).toBool(false);
     component.textData.nAlign = textObject.value(QStringLiteral("align")).toInt(Qt::AlignLeft);
+    // 旧版本文件没有 opacity 字段：默认 100（完全不透明），显示效果与旧版一致
+    component.textData.nOpacityPercent =
+        qBound(0, textObject.value(QStringLiteral("opacity")).toInt(100), 100);
 
     const QJsonObject tableObject = rComponentObject.value(QStringLiteral("table")).toObject();
     component.tableData.vecRows.clear();

@@ -378,12 +378,31 @@ docs/         # 文档（本文件）
   注：`test_author_mark_dialog` 在 offscreen 无字体库环境下 Qt 会回退字体族，
   故默认字体族断言做了降级处理（有该字体时严格比对）。
 
+### 「插入 → 文本」接入字体组件实现记录
+
+- **需求**：文本插入时能直接设置字体、字号、颜色等样式，并复用署名设置里封装好的字体组件，
+  避免「插入后再双击组件改样式」的绕路操作。
+- **对话框**：新增 `plugin/builtin/TextStyleDialog`（文本内容 + 对齐方式 + `ui/FontSelectWidget`）。
+  放在 plugin/builtin/ 层是因为插入流程（`TextComponentProvider::showInputDialog`）与
+  编辑流程（`ComponentItem::editTextContent`）都要调用它；**两处统一复用**后，
+  `ComponentItem` 里原先手写的那份内联对话框已删除，不再存在两套不一致的 UI。
+- **文本不透明度**：`TextData` 增加 `nOpacityPercent`（默认 100），
+  `ComponentSerializer` 读写 `opacity`（旧项目文件缺该字段回退 100，向后兼容），
+  `ComponentPainter` 绘制文本时把不透明度合成到颜色 alpha；`operator==` 同步参与比较。
+  颜色仍只存 `#RRGGBB`（`colorToString` 不保留 alpha），透明度单列存储，与署名水印的做法一致。
+- **默认字体来源收敛**：新增 `textDefaultFontFamily()`（原先硬编码在 `ComponentPainter`），
+  绘制与设置界面共用同一默认字体，避免两处默认值漂移。
+- **对齐值的兼容处理（实施中发现的问题）**：`Qt::AlignLeft`(1) 与 `AlignLeft|AlignVCenter`(129)
+  的 `drawText` 渲染结果**并不相同**（垂直位置不同）。旧「编辑文本」对话框把「左对齐」写成 129，
+  而 `TextData` 默认是 1：若新对话框直接沿用 129，插入的新文本会垂直居中，与旧版本排版不一致。
+  现做法：下拉框的「左对齐」用历史默认值 1，且**水平对齐未变时保留原值写回**
+  （1 / 129 两种历史取值都不会无故跳变），只有用户真的改变水平对齐方式时才写入规范值。
+- **测试**：新增 `tests/plugin/builtin/test_text_style_dialog.cpp`（默认值 / 数据往返 / 字号与不透明度收敛 /
+  对齐原值保留）、`tests/core/test_text_style.cpp`（默认值、相等比较、序列化往返、旧文件缺字段回退、
+  不透明度绘制像素断言、字号绘制断言）；`tests/core/test_project_serialization.cpp` 增加文本不透明度往返。
+
 ## 8.2 后续待办
 
-- [ ] **「插入 → 文本」接入 `ui/FontSelectWidget`**（本次仅完成组件封装与署名场景使用）：
-      现文本插入仍只弹 `QInputDialog` 输入内容，**改字号/颜色/字体必须插入后再双击组件**；
-      应改为「内容 + 字体样式」对话框并复用 `FontSelectWidget`。
-      注意 `TextData` 颜色序列化（`colorToString`）目前丢弃 alpha，若要让文本也支持不透明度需先扩展序列化。
 - [ ] 小黑盒图片规格实测（单张上限/张数/推荐尺寸），必要时默认倍率上调为 3x
 - [ ] 安装包发布（windeployqt 打包 + NSIS/Inno Setup）
 - [ ] GIF 导出、蒙版/滤镜、模板占位符/变量

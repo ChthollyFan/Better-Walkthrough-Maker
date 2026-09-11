@@ -30,6 +30,7 @@ add_library(bwm_core STATIC
   plugin/PluginHost.cpp
   # 内置适配器
   plugin/builtin/CardBorderDialog.cpp
+  plugin/builtin/TextStyleDialog.cpp
   plugin/builtin/BuiltinComponentProviders.cpp
   plugin/builtin/BuiltinArticleExportProviders.cpp
   plugin/builtin/BuiltinExportProviders.cpp
