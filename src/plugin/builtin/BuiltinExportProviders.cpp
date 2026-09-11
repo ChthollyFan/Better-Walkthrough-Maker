@@ -76,7 +76,8 @@ int PngSeparateExportProvider::exportPages(const QVector<Page>& vecPages,
         const QImage image = ExportRenderer::renderPage(vecPages.at(nIndex), dScale,
                                                         rContext.theme.backgroundColor,
                                                         strAuthor,
-                                                        rContext.projectDirectory);
+                                                        rContext.projectDirectory,
+                                                        rContext.authorMarkStyle);
         const QString strFileName = QStringLiteral("%1_%2.png")
                                         .arg(strSafeTitle)
                                         .arg(nIndex + 1, 2, 10, QLatin1Char('0'));
@@ -121,7 +122,8 @@ int PngLongImageExportProvider::exportPages(const QVector<Page>& vecPages,
     QString strErrorMessage;
     const QImage image = ExportRenderer::renderLongImage(
         vecPages, dScale, true, &strErrorMessage,
-        rContext.theme.backgroundColor, strAuthor, rContext.projectDirectory);
+        rContext.theme.backgroundColor, strAuthor, rContext.projectDirectory,
+        rContext.authorMarkStyle);
     if(image.isNull()) {
         QMessageBox::critical(pParent, QStringLiteral("导出 PNG"), strErrorMessage);
         return 0;

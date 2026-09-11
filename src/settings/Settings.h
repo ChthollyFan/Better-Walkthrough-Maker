@@ -11,6 +11,8 @@
 #include <QString>
 #include <QStringList>
 
+#include "core/AuthorMarkStyle.h"
+
 class QSettings;
 
 namespace bwm {
@@ -29,6 +31,11 @@ public:
     // 作者署名（如小黑盒 ID）；导出时可选应用，M4 使用
     static QString authorName();
     static void setAuthorName(const QString& strName);
+
+    // 署名水印样式（位置/字体/字号/加粗/颜色/不透明度）；由导出对话框「署名设置…」修改。
+    // 未设置过时返回默认样式（等价于旧版本硬编码：右下角、微软雅黑 18px、黑色 63%）。
+    static AuthorMarkStyle authorMarkStyle();
+    static void setAuthorMarkStyle(const AuthorMarkStyle& rStyle);
 
     // 最近项目（json 路径列表，最近优先）
     static QStringList recentProjects();

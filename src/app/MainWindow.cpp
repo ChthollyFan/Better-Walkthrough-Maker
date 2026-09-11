@@ -979,6 +979,8 @@ PluginContext MainWindow::makeContext() const
     ctx.defaultPageSize = Settings::defaultPageSize();
     ctx.projectDirectory = m_pProjectManager->hasProject()
         ? m_pProjectManager->projectDirectory() : QString();
+    // 署名水印样式：导出对话框还会在导出前用最新设置覆盖一次
+    ctx.authorMarkStyle = Settings::authorMarkStyle();
     // 注意：currentPage 返回非 const，这里不能在 const 方法中调用
     // pCurrentPage 由调用方在需要时单独设置
     return ctx;

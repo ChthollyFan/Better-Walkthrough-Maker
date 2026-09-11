@@ -124,10 +124,13 @@ struct Walkthrough {
 | 格式 | formatId | 产物 | 署名 |
 |---|---|---|---|
 | Markdown 文件 | `article.markdown` | `文章名.md`（原样，保留 `![[W:P]]`）+ `文章名_compatible.md`（引用替换为图片）+ `images/`（页面渲染图 + 素材副本） | 无（保持原文纯净） |
-| PNG 长图 | `article.png.longimage` | `文章名.png`，宽 1080，高度自适应 | 右下角半透明水印 |
-| PDF 文档 | `article.pdf` | `文章名.pdf`，A4 自动分页 | 文末署名行 |
+| PNG 长图 | `article.png.longimage` | `文章名.png`，宽 1080，高度自适应 | 水印（位置/字体/字号/颜色/不透明度可设置） |
+| PDF 文档 | `article.pdf` | `文章名.pdf`，A4 自动分页 | 文末署名行（字体/字号/加粗/颜色跟随设置） |
 
 署名来自全局设置中的"作者署名"，由导出对话框的"添加作者署名"复选框控制。
+水印样式在导出对话框的「署名设置…」里配置（位置四选一、字体族、字号、加粗、颜色、不透明度），
+持久化在 QSettings 并随 `PluginContext::authorMarkStyle` 传给 Provider（接口签名不变）。
+PDF 的署名行位于文档末尾，位置与不透明度设置对文本流不适用。
 
 ### 5.3 IExportProvider 接口扩展
 
@@ -267,6 +270,10 @@ test_article_export（10 个用例）
 8. **链接失败（Permission denied）**：`bwm.exe` 正在运行导致链接器无法写入，编译前需先结束进程。
 9. **作者署名遗漏**：`exportArticle()` 接口最初没有 `strAuthor` 参数，导致文章导出无署名。
    已补充该参数，PNG 绘制右下角水印（复用 `ExportRenderer::drawAuthorMark`），PDF 在文末追加署名行。
+10. **署名样式可配置（后续迭代）**：水印位置/字体/字号/颜色/不透明度改为全局设置项
+    （`core/AuthorMarkStyle` + `Settings::authorMarkStyle`），由导出对话框「署名设置…」打开
+    `AuthorMarkDialog` 配置；样式经 `PluginContext` 传给 Provider，PNG 水印按四角位置绘制，
+    PDF 署名行套用字体/字号/加粗/颜色。默认值等价旧版硬编码行为，未配置时导出结果不变。
 
 ## 十、后续可扩展方向
 

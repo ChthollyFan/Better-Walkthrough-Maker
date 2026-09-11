@@ -60,8 +60,13 @@ public:
 
 private slots:
     void onAccept();
+    // 打开「署名设置…」对话框（水印位置 / 字体 / 字号 / 颜色 / 不透明度）
+    void onOpenAuthorMarkDialog();
 
 private:
+    // 刷新署名复选框文案（带当前位置摘要）与「署名设置…」按钮可用状态
+    void updateAuthorMarkControls();
+
     class Ui;
     Ui* m_pUi;
     ProjectManager* m_pProjectManager;   ///< 项目管理器

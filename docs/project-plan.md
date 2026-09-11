@@ -146,10 +146,13 @@
 | 格式 | 产物 | 署名 |
 |---|---|---|
 | Markdown | `文章名.md`（原样，保留 `![[W:P]]`）+ `文章名_compatible.md`（引用替换为图片，外部阅读器可看）+ `images/`（页面渲染图 + 素材副本） | 无 |
-| PNG 长图 | `文章名.png`，宽 1080，高度自适应；字号按宽度比例缩放 | 右下角水印 |
+| PNG 长图 | `文章名.png`，宽 1080，高度自适应；字号按宽度比例缩放 | 水印（位置可选四角） |
 | PDF | `文章名.pdf`，A4 自动分页 | 文末署名行 |
 
 署名由全局设置"作者署名" + 导出对话框"添加作者署名"复选框控制（图文攻略的署名同样逻辑）。
+水印样式（位置 / 字体 / 字号 / 加粗 / 颜色 / 不透明度）由导出对话框的「署名设置…」按钮打开设置，
+经 QSettings 持久化（`authorMark/*` 键），并随 `PluginContext` 传给导出 Provider——
+因此**不改 `IExportProvider` 接口签名**，第三方插件保持向后兼容。
 
 导出完成后统一显示"导出完成"对话框，提供"打开目录"按钮。
 
@@ -167,6 +170,8 @@
 ### 5.9 全局设置
 
 - 作者署名（如小黑盒 ID）：全局设置项，导出时可选择应用。
+- 署名水印样式：位置（左上 / 右上 / 左下 / 右下）、字体族、字号、加粗、颜色、不透明度；
+  入口在导出对话框「署名设置…」，与作者署名一起持久化在 QSettings。
 - 默认画布尺寸、默认主题、默认字体。
 - 自动保存间隔、最近项目数量。
 - 界面语言（中文默认）、界面深浅色主题。
@@ -341,8 +346,44 @@ docs/         # 文档（本文件）
   **今后任何改动组件数据（尤其是图片路径）的代码都必须经此入口**。
   回归保护：`test_canvas_scene` 增加「卡片边框换图后画布显示新图」用例（禁用刷新该用例即失败，已实测验证）。
 
+### 署名水印样式设置实现记录
+
+- **需求**：导出对话框的「添加作者署名」旁增加设置入口，可调水印位置、字体、字号、颜色
+  （评审后追加：不透明度；并确定字体部分要封装成可复用组件，供「插入 → 文本」等后续场景复用）。
+- **数据模型**：新增 `core/AuthorMarkStyle`（位置枚举 + 字体族 + 字号 + 加粗 + 颜色 + 不透明度），
+  位置提供字符串互转（`top-left` / `top-right` / `bottom-left` / `bottom-right`），
+  `clamp()` 收敛字号与不透明度区间。默认值刻意等价旧版硬编码水印
+  （右下角、微软雅黑、18px、不加粗、黑色 63% 不透明），**未改过设置的用户导出结果与旧版本完全一致**。
+- **持久化**：`Settings::authorMarkStyle()` / `setAuthorMarkStyle()`，键为 `authorMark/position`、
+  `authorMark/fontFamily`、`authorMark/fontSize`、`authorMark/bold`、`authorMark/color`、`authorMark/opacity`。
+  颜色只存 `#RRGGBB`（`colorToString` 不保留 alpha），不透明度单独一列存 0~100。
+- **可复用组件**：新增 `ui/FontSelectWidget`（字体族 `QFontComboBox` + 字号 + 加粗 + 颜色 + 不透明度 + 预览），
+  字段与 `Component` 的 `TextData` 一一对应；署名设置对话框通过它组装界面，**后续「插入 → 文本」直接复用**。
+- **对话框**：新增 `app/dialogs/AuthorMarkDialog`（位置下拉 + 字体组件 + 预览）。
+  预览调用导出同一条绘制路径 `ExportRenderer::drawAuthorMark`，保证所见即所得；
+  预览页尺寸 640×400、按 1x 绘制，字号大小可直接在预览里判断。
+- **渲染**：`ExportRenderer::drawAuthorMark(image, author, style, scaleFactor)` 支持四角位置、
+  字体/字号/加粗、颜色与不透明度合成；`renderPage` / `renderLongImage` 仅在参数表**末尾**新增样式参数
+  （默认值 = 旧行为），因此既有调用点无需改动。字号缩放系数：页面导出＝导出倍率，文章长图＝图片宽度/720。
+- **接口兼容**：样式通过 `PluginContext::authorMarkStyle` 传给导出 Provider，不改 `IExportProvider`
+  的 `exportPages` / `exportArticle` 签名；导出对话框在导出前把最新设置写入上下文，
+  因此「改完设置直接导出」立即生效。
+- **PDF**：署名仍是文档末尾一行（位置与不透明度对文本流不适用），字体族/字号/加粗/颜色生效，
+  字号按「正文的 3/4」历史比例随设置等比换算。
+- **测试**：新增 `test_author_mark_style`（默认值 / 字符串往返 / 区间收敛 / 相等比较）、
+  `test_font_select_widget`（字体-颜色-不透明度读写往返 / 信号 / 行显隐）、
+  `test_author_mark_dialog`（样式往返，单独编译 app 层对话框源文件）；
+  `test_export_renderer` 增加「四角位置落位 + 对角干净」「不透明度 0 不绘制 + 字号/颜色生效」；
+  `test_article_export` 增加「署名样式经 PluginContext 生效」（与无署名图逐像素比对，差异只允许在左上区域）。
+  注：`test_author_mark_dialog` 在 offscreen 无字体库环境下 Qt 会回退字体族，
+  故默认字体族断言做了降级处理（有该字体时严格比对）。
+
 ## 8.2 后续待办
 
+- [ ] **「插入 → 文本」接入 `ui/FontSelectWidget`**（本次仅完成组件封装与署名场景使用）：
+      现文本插入仍只弹 `QInputDialog` 输入内容，**改字号/颜色/字体必须插入后再双击组件**；
+      应改为「内容 + 字体样式」对话框并复用 `FontSelectWidget`。
+      注意 `TextData` 颜色序列化（`colorToString`）目前丢弃 alpha，若要让文本也支持不透明度需先扩展序列化。
 - [ ] 小黑盒图片规格实测（单张上限/张数/推荐尺寸），必要时默认倍率上调为 3x
 - [ ] 安装包发布（windeployqt 打包 + NSIS/Inno Setup）
 - [ ] GIF 导出、蒙版/滤镜、模板占位符/变量

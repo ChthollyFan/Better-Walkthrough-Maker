@@ -110,6 +110,9 @@ bool TextComponentProvider::showInputDialog(QWidget* pParent, Component& rCompon
                                             const PluginContext& rContext) const
 {
     (void)rContext;
+    // TODO 插入→文本 目前只输入内容，字号/颜色/字体需插入后再双击组件编辑。
+    // 后续应改为「内容 + 字体样式」对话框，直接复用 ui/FontSelectWidget
+    // （见 docs/project-plan.md 8.2 后续待办）。
     bool bOk = false;
     const QString strContent = QInputDialog::getText(
         pParent, QStringLiteral("插入文本"), QStringLiteral("文本内容："),

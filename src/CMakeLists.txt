@@ -2,6 +2,7 @@
 # 插件接口与内置适配器（主程序与单元测试共用）
 add_library(bwm_core STATIC
   core/Article.cpp
+  core/AuthorMarkStyle.cpp
   core/Component.cpp
   core/ComponentPainter.cpp
   core/ComponentSerializer.cpp
@@ -20,8 +21,9 @@ add_library(bwm_core STATIC
   template/BuiltinTemplates.cpp
   template/TemplateManager.cpp
   theme/Theme.cpp
-  # UI 外观层（窗口/控件风格）
+  # UI 外观层（窗口/控件风格）与可复用控件
   ui/AcrylicHelper.cpp
+  ui/FontSelectWidget.cpp
   ui/GlassStyleProvider.cpp
   ui/UiStyle.cpp
   # 插件接口与宿主
@@ -57,6 +59,7 @@ add_executable(bwm WIN32
   app/panels/LayerPanel.cpp
   app/dialogs/NewProjectDialog.cpp
   app/dialogs/ExportDialog.cpp
+  app/dialogs/AuthorMarkDialog.cpp
   app/dialogs/SettingsDialog.cpp
   editor/CanvasScene.cpp
   editor/CanvasView.cpp
