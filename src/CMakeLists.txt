@@ -73,3 +73,7 @@ if(WIN32)
 endif()
 
 target_link_libraries(bwm PRIVATE bwm_core)
+
+# 把顶层 project(VERSION) 以宏注入主程序，main.cpp 据此设置 QCoreApplication::applicationVersion()。
+# 好处：版本号只有 CMakeLists.txt 一处来源，「关于」对话框不会再出现版本号忘记同步的情况。
+target_compile_definitions(bwm PRIVATE BWM_VERSION="${PROJECT_VERSION}")

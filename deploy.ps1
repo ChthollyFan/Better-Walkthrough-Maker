@@ -23,7 +23,8 @@ if (-not $Version) {
     } catch {
         $Version = ""
     }
-    if (-not $Version) { $Version = "0.1.0" }
+    # 无 tag 时的回退版本号，需与 CMakeLists.txt 的 project(VERSION) 保持一致
+    if (-not $Version) { $Version = "0.3.0" }
 }
 Write-Host "Packaging version: $Version"
 
