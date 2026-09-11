@@ -66,6 +66,7 @@
 #include <QUndoStack>
 #include <QUuid>
 #include <QUrl>
+#include <QtGlobal>   // qVersion()：「关于」对话框显示运行时的 Qt 版本
 
 #include <algorithm>
 #include <climits>
@@ -681,7 +682,7 @@ void MainWindow::onCopyPageToClipboard()
                                                     QString(),
                                                     m_pProjectManager->projectDirectory());
     QApplication::clipboard()->setImage(image);
-    statusBar()->showMessage(QStringLiteral("当前页已复制到剪贴板（2x），可直接粘贴到小黑盒"), 4000);
+    statusBar()->showMessage(QStringLiteral("当前页已复制到剪贴板（2x），可直接粘贴使用"), 4000);
 }
 
 void MainWindow::onShowSettings()
@@ -717,13 +718,21 @@ void MainWindow::onShowShortcuts()
 
 void MainWindow::onShowAbout()
 {
-    QMessageBox::about(this, QStringLiteral("关于 更好的攻略制作器"),
-                       QStringLiteral(
-                           "更好的攻略制作器（Better Walkthrough Maker）\n"
-                           "版本 %1\n\n"
-                           "面向游戏攻略作者的桌面设计工具：\n"
-                           "用模板 + 自由画布制作攻略配图，导出 PNG 发布到小黑盒等平台。")
-                       .arg(QCoreApplication::applicationVersion()));
+    // 「关于」文案随功能迭代同步更新（0.3.0 起补入文章攻略与多格式导出，此前停留在初版介绍）。
+    // 注意：介绍里只说明"能做出什么、能导出什么格式"，不点名任何发布平台。
+    // %1 = 应用版本（见 main.cpp），%2 = 运行时 Qt 版本。
+    QMessageBox::about(
+        this, QStringLiteral("关于 更好的攻略制作器"),
+        QStringLiteral("更好的攻略制作器（Better Walkthrough Maker）\n"
+                       "版本 %1\n\n"
+                       "面向游戏攻略作者的桌面设计工具，用「模板 + 自由画布」制作攻略内容：\n"
+                       "  · 图文攻略页面：图片 / 文本 / 表格 / 形状 / 贴纸自由排版\n"
+                       "  · 文章攻略：Markdown 分栏编辑，正文可引用攻略页面\n"
+                       "  · 模板与美化包：内置模板、贴纸装饰、主题配色\n"
+                       "  · 导出：页面与文章均可导出（PNG / PDF / Markdown），可选作者署名\n\n"
+                       "许可协议：MIT\n"
+                       "基于 Qt %2 构建")
+            .arg(QCoreApplication::applicationVersion(), QString::fromLatin1(qVersion())));
 }
 
 void MainWindow::onToggleAutoSave(bool bEnabled)

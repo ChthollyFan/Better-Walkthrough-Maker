@@ -1,6 +1,6 @@
 # Better-Walkthrough-Maker
 
-**更好的攻略制作器** —— 面向游戏攻略作者的桌面设计工具：用"模板 + 自由画布"的方式制作攻略配图（装备推荐、属性对比、剧情流程等），导出 PNG 发布到小黑盒等平台。
+**更好的攻略制作器** —— 面向游戏攻略作者的桌面设计工具：用"模板 + 自由画布"的方式制作攻略内容（装备推荐、属性对比、剧情流程等图文配图，以及 Markdown 图文文章），导出 PNG / PDF / Markdown 等格式。
 
 ## 功能特性
 
@@ -9,7 +9,8 @@
 - **素材库**：批量导入图片（复制进项目自包含），缩略图预览，双击插入画布
 - **模板系统**：六类内置模板（装备推荐/属性对比/剧情流程/武器评测/地图点位/通用封面）+ 空白模板；用户模板保存/导入/导出（.json）
 - **美化包**：贴纸装饰（标题装饰线/角标/星标/箭头/分割线/卡片边框）+ 主题包（深色游戏风/浅色简洁风，影响画布与导出背景）
-- **导出**：单页/批量/长图 PNG（1x/2x/3x），可选作者署名，一键打开导出目录；复制当前页到剪贴板直贴小黑盒
+- **导出**：页面支持单页 / 批量 / 长图 PNG（1x/2x/3x），文章支持 Markdown / PNG 长图 / PDF；可选作者署名，一键打开导出目录；复制当前页到剪贴板
+- **文章攻略**：Markdown 分栏编辑（源码 + 实时预览），正文可用 `![[W:P]]` 引用攻略页面，支持导入 `.md` 文件
 
 ## 截图
 
@@ -23,10 +24,12 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/ChthollyFan/Better-Walkthrough-Maker)](https://github.com/ChthollyFan/Better-Walkthrough-Maker/releases)
 
-- **绿色版 zip**：从 [Releases](https://github.com/ChthollyFan/Better-Walkthrough-Maker/releases) 下载，解压后直接运行 `BetterWalkthroughMaker.exe`（无需安装 Qt）
-- **本地打包（文件夹版）**：`powershell -ExecutionPolicy Bypass -File .\deploy.ps1`（生成 `dist/` 下绿色版 zip），或 `pwsh -File package.ps1`（生成 `release/` 目录 + zip）
-- **单文件打包**：`pwsh -File package_single.ps1`（生成 `bwm-single.exe`，单文件免 DLL；需安装 [Enigma Virtual Box](https://enigmaprotector.com/en/downloads.html)）
-- **自动发布**：打标签 `git tag v0.1.0 && git push origin v0.1.0`，GitHub Actions 自动构建（装 Qt → 编译 → 测试 → 打包）并发布到 Releases
+发布产物只有一个：**单文件 `BWM.exe`**（免安装、无需 Qt DLL）。
+
+- **下载使用**：从 [Releases](https://github.com/ChthollyFan/Better-Walkthrough-Maker/releases) 下载 `BWM.exe`，双击即可运行
+- **本地打包（单文件，发布用）**：先 `pwsh -File package.ps1` 生成 `release/` 目录，再 `pwsh -File package_single.ps1` 打包出根目录下的 `BWM.exe`（打包工具 `tools/enigmavbconsole.exe` 已随仓库提供）
+- **本地打包（文件夹版）**：`pwsh -File package.ps1`（生成 `release/` 目录 + zip 压缩包）；或 `powershell -ExecutionPolicy Bypass -File .\deploy.ps1`（生成 `dist/` 下绿色版 zip）
+- **自动发布**：打标签 `git tag v0.3.0 && git push origin v0.3.0`，GitHub Actions 自动构建（装 Qt → 编译 → 测试 → 打包）并发布 `BWM.exe` 到 Releases
 
 ## 文档
 
@@ -65,4 +68,4 @@ build\src\bwm.exe
 - ✅ 单元测试 6 个测试程序全部通过（序列化 / 项目管理 / 导出渲染 / 模板 / 文章数据 / 文章导入导出）
 - ✅ 文章攻略：Markdown 分栏编辑、`![[W:P]]` 页面引用、导入导出（Markdown / PNG / PDF）、作者署名
 - ✅ 应用图标、导出目录记忆、单文件打包（Enigma Virtual Box）
-- ⏳ 后续：小黑盒图片规格实测、安装包发布、GIF 导出、蒙版/滤镜、模板占位符
+- ⏳ 后续：目标平台的图片规格实测、安装包发布、GIF 导出、蒙版/滤镜、模板占位符
