@@ -5,6 +5,7 @@ add_library(bwm_core STATIC
   core/Component.cpp
   core/ComponentPainter.cpp
   core/ComponentSerializer.cpp
+  core/ImageFit.cpp
   core/PageBackground.cpp
   core/Project.cpp
   core/ProjectSerializer.cpp

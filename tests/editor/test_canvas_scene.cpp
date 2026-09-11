@@ -20,6 +20,7 @@
 
 #include "core/Project.h"
 #include "editor/CanvasScene.h"
+#include "editor/ComponentItem.h"
 
 using namespace bwm;
 
@@ -35,6 +36,8 @@ private slots:
     void testMissingBackgroundImageFallsBackToPageColor();
     // 组件绘制在背景图之上
     void testComponentsDrawAboveBackgroundImage();
+    // 卡片边框换图后，画布必须显示新图（图片缓存按路径失效）
+    void testCardBorderImageSwapRefreshesCache();
 };
 
 namespace {
@@ -149,6 +152,43 @@ void TestCanvasScene::testComponentsDrawAboveBackgroundImage()
     // 组件区域内为组件的红色，区域外仍为背景图的蓝色
     QCOMPARE(scenePixel(scene, QPoint(10, 10)), QColor(255, 0, 0));
     QCOMPARE(scenePixel(scene, QPoint(30, 15)), QColor(0, 0, 255));
+}
+
+void TestCanvasScene::testCardBorderImageSwapRefreshesCache()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QVERIFY(writeAssetImage(tempDir.path(), QStringLiteral("assets/red.png"),
+                            QColor(255, 0, 0), QSize(40, 40)));
+    QVERIFY(writeAssetImage(tempDir.path(), QStringLiteral("assets/green.png"),
+                            QColor(0, 255, 0), QSize(40, 40)));
+
+    CanvasScene scene;
+    scene.setProjectDirectory(tempDir.path());
+
+    Page page;
+    page.size = QSize(40, 40);
+    Component border;
+    border.strId = QStringLiteral("border-1");
+    border.eType = E_COMPONENT_TYPE_STICKER;
+    border.stickerData.eStickerType = E_STICKER_TYPE_CARD_BORDER;
+    border.stickerData.color = QColor(0, 0, 0);
+    border.stickerData.strImagePath = QStringLiteral("assets/red.png");
+    border.size = QSizeF(40, 40);
+    border.nZOrder = 1;
+    page.vecComponents.append(border);
+    scene.loadPage(page);
+
+    QCOMPARE(scenePixel(scene, QPoint(20, 20)), QColor(255, 0, 0));
+
+    // 模拟「二次编辑 → 替换图片」：走组件数据变更入口后，缓存必须失效并显示新图
+    const QVector<ComponentItem*> vecItems = scene.componentItems();
+    QCOMPARE(vecItems.size(), 1);
+    Component updated = vecItems.first()->component();
+    updated.stickerData.strImagePath = QStringLiteral("assets/green.png");
+    vecItems.first()->applyComponentData(updated);
+
+    QCOMPARE(scenePixel(scene, QPoint(20, 20)), QColor(0, 255, 0));
 }
 
 int main(int argc, char* argv[])

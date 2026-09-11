@@ -3,6 +3,7 @@ find_package(Qt6 REQUIRED COMPONENTS Test)
 
 set(TEST_SOURCES
   core/test_card_border.cpp
+  core/test_image_fit.cpp
   core/test_page_background.cpp
   core/test_project_serialization.cpp
   core/test_project_manager.cpp
@@ -10,6 +11,7 @@ set(TEST_SOURCES
   export/test_article_export.cpp
   export/test_export_renderer.cpp
   template/test_template.cpp
+  plugin/builtin/test_card_border_dialog.cpp
 )
 
 foreach(test_source IN LISTS TEST_SOURCES)

@@ -32,6 +32,7 @@
 #include "editor/CanvasScene.h"
 #include "core/ComponentPainter.h"
 #include "plugin/builtin/CardBorderDialog.h"
+#include "project/AssetStore.h"
 
 namespace bwm {
 
@@ -64,9 +65,9 @@ ComponentItem::ComponentItem(const Component& rComponent, QGraphicsItem* pParent
     setAcceptHoverEvents(true);
     setPos(rComponent.pos);
     setRotation(rComponent.dRotation);
-    if (rComponent.eType == E_COMPONENT_TYPE_IMAGE && !rComponent.imageData.strFilePath.isEmpty()) {
-        m_imageCache.load(rComponent.imageData.strFilePath);
-    }
+    // 图片缓存：图片组件与卡片边框图片共用（卡片边框此时可能还没有项目目录，
+    // CanvasScene 随后调用 setProjectDirectory() 会再次刷新）
+    refreshImageCache();
 }
 
 QRectF ComponentItem::boundingRect() const
@@ -80,15 +81,55 @@ QRectF ComponentItem::boundingRect() const
 
 void ComponentItem::setComponent(const Component& rComponent)
 {
-    m_component = rComponent;
+    applyComponentData(rComponent);
     setPos(rComponent.pos);
     setRotation(rComponent.dRotation);
-    if (rComponent.eType == E_COMPONENT_TYPE_IMAGE
-        && !rComponent.imageData.strFilePath.isEmpty()
-        && m_imageCache.isNull()) {
-        m_imageCache.load(rComponent.imageData.strFilePath);
-    }
+}
+
+void ComponentItem::applyComponentData(const Component& rComponent)
+{
+    m_component = rComponent;
+    // 组件数据变了：图片路径可能已更换，缓存必须失效重载，
+    // 否则二次编辑（替换图片）后画布仍显示最初那张图
+    refreshImageCache();
     update();
+}
+
+void ComponentItem::setProjectDirectory(const QString& strDir)
+{
+    if (m_strProjectDirectory == strDir) {
+        return;
+    }
+    m_strProjectDirectory = strDir;
+    // 项目目录变化会改变相对路径的解析结果，缓存需重算
+    refreshImageCache();
+    update();
+}
+
+QString ComponentItem::componentImagePath(const Component& rComponent) const
+{
+    if (rComponent.eType == E_COMPONENT_TYPE_IMAGE) {
+        return rComponent.imageData.strFilePath;
+    }
+    if (rComponent.eType == E_COMPONENT_TYPE_STICKER
+        && rComponent.stickerData.eStickerType == E_STICKER_TYPE_CARD_BORDER) {
+        return AssetStore::resolvePath(rComponent.stickerData.strImagePath,
+                                       m_strProjectDirectory);
+    }
+    return QString();
+}
+
+void ComponentItem::refreshImageCache()
+{
+    const QString strPath = componentImagePath(m_component);
+    if (strPath == m_strCachedImagePath) {
+        return;   // 图片未变化，沿用缓存
+    }
+    m_strCachedImagePath = strPath;
+    m_imageCache = QImage();
+    if (!strPath.isEmpty()) {
+        m_imageCache.load(strPath);
+    }
 }
 
 void ComponentItem::paint(QPainter* pPainter, const QStyleOptionGraphicsItem*, QWidget*)
@@ -102,8 +143,10 @@ void ComponentItem::paint(QPainter* pPainter, const QStyleOptionGraphicsItem*, Q
 void ComponentItem::paintContent(QPainter* pPainter)
 {
     const QRectF contentRect(0, 0, m_component.size.width(), m_component.size.height());
-    // 与导出共用同一渲染实现（见 core/ComponentPainter）
-    ComponentPainter::paint(pPainter, m_component, contentRect, &m_imageCache);
+    // 与导出共用同一渲染实现（见 core/ComponentPainter）；
+    // 传入项目目录以便解析卡片边框图片的相对路径
+    ComponentPainter::paint(pPainter, m_component, contentRect, &m_imageCache,
+                            m_strProjectDirectory);
 }
 
 void ComponentItem::paintSelectionDecoration(QPainter* pPainter)
@@ -417,19 +460,20 @@ void ComponentItem::editCardBorder()
 {
     emit editStarted();
 
-    const QSizeF sizeBefore = m_component.size;
-    CardBorderDialog dialog(nullptr, m_component.stickerData);
+    CardBorderDialog dialog(nullptr, m_component.stickerData, m_strProjectDirectory);
     if (dialog.exec() == QDialog::Accepted) {
-        m_component.stickerData = dialog.stickerData();
+        Component updated = m_component;
+        updated.stickerData = dialog.stickerData();
         // 正方形/圆形按组件内接正方形绘制：把尺寸归一为 1:1（以短边为准，位置不变）
         if (dialog.needsSquareSize()) {
-            const qreal dSide = qMin(m_component.size.width(), m_component.size.height());
-            m_component.size = QSizeF(dSide, dSide);
+            const qreal dSide = qMin(updated.size.width(), updated.size.height());
+            updated.size = QSizeF(dSide, dSide);
         }
-        if (m_component.size != sizeBefore) {
+        if (updated.size != m_component.size) {
             prepareGeometryChange();   // 尺寸变化：让场景重算包围盒
         }
-        update();
+        // 统一走数据变更入口：其中的缓存刷新保证「替换图片」后立刻显示新图
+        applyComponentData(updated);
         emit geometryChanged();
     }
 

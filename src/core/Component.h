@@ -94,6 +94,13 @@ struct StickerData {
     // 四种形状合并到「卡片边框」一个插入项，作为插入后（或插入时）可切换的选项，
     // 不在「插入」菜单里拆成多个菜单项。
     E_CARD_BORDER_SHAPE eBorderShape = E_CARD_BORDER_SHAPE_RECTANGLE;
+    // 卡片边框内要展示的图片（项目内**相对路径**，如 "assets/xxx.png"；空 = 无图片）。
+    // 绘制时按边框形状裁剪：框内显示、框外隐藏；用相对路径保证项目可整体移动。
+    QString strImagePath;
+    // 图片取景位置（0 = 贴左/上边缘，0.5 = 居中，1 = 贴右/下边缘）。
+    // 图片按「等比覆盖」铺满边框区域，比例不符时由这两个值决定露出哪一部分。
+    qreal dImageOffsetX = 0.5;
+    qreal dImageOffsetY = 0.5;
 };
 
 // 组件：画布元素。数据与渲染分离——本结构仅存数据，渲染由 editor/ComponentItem 完成。
@@ -165,7 +172,10 @@ inline bool operator==(const StickerData& rLeft, const StickerData& rRight)
 {
     return rLeft.eStickerType == rRight.eStickerType
         && rLeft.color == rRight.color
-        && rLeft.eBorderShape == rRight.eBorderShape;
+        && rLeft.eBorderShape == rRight.eBorderShape
+        && rLeft.strImagePath == rRight.strImagePath
+        && qFuzzyCompare(rLeft.dImageOffsetX, rRight.dImageOffsetX)
+        && qFuzzyCompare(rLeft.dImageOffsetY, rRight.dImageOffsetY);
 }
 
 inline bool operator==(const Component& rLeft, const Component& rRight)

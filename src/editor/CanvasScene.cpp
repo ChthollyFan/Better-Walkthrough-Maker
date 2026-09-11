@@ -112,7 +112,14 @@ void CanvasScene::setPageBackgroundColor(const QColor& rColor)
 
 void CanvasScene::setProjectDirectory(const QString& strDir)
 {
+    if (m_strProjectDirectory == strDir) {
+        return;
+    }
     m_strProjectDirectory = strDir;
+    // 同步已有图元：卡片边框图片的相对路径需要项目目录才能解析
+    for (ComponentItem* pItem : m_vecItems) {
+        pItem->setProjectDirectory(strDir);
+    }
 }
 
 void CanvasScene::syncToModel(Page* pPage)
@@ -148,6 +155,7 @@ ComponentItem* CanvasScene::addComponent(const Component& rComponent)
     }
 
     auto* pItem = new ComponentItem(component);
+    pItem->setProjectDirectory(m_strProjectDirectory);
     pItem->setZValue(component.nZOrder);
     connect(pItem, &ComponentItem::geometryChanged, this, &CanvasScene::componentsChanged);
     connect(pItem, &ComponentItem::editStarted, this, &CanvasScene::componentEditStarted);
@@ -195,6 +203,7 @@ void CanvasScene::rebuildItems(const QVector<Component>& rComponents)
 {
     for (const Component& rComponent : rComponents) {
         auto* pItem = new ComponentItem(rComponent);
+        pItem->setProjectDirectory(m_strProjectDirectory);
         pItem->setZValue(rComponent.nZOrder);
         connect(pItem, &ComponentItem::geometryChanged, this, &CanvasScene::componentsChanged);
         connect(pItem, &ComponentItem::editStarted, this, &CanvasScene::componentEditStarted);

@@ -283,8 +283,8 @@ bool StickerComponentProvider::requiresInputDialog() const
 bool StickerComponentProvider::showInputDialog(QWidget* pParent, Component& rComponent,
                                                const PluginContext& rContext) const
 {
-    (void)rContext;
-    CardBorderDialog dialog(pParent, rComponent.stickerData);
+    // 传项目目录：对话框选图时把图片复制进 assets/ 并记录相对路径
+    CardBorderDialog dialog(pParent, rComponent.stickerData, rContext.projectDirectory);
     if(dialog.exec() != QDialog::Accepted) {
         return false;   // 用户取消
     }

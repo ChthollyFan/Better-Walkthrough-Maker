@@ -11,6 +11,9 @@
 #include <QPolygonF>
 #include <QtMath>
 
+#include "core/ImageFit.h"
+#include "project/AssetStore.h"
+
 namespace bwm {
 
 namespace {
@@ -61,7 +64,8 @@ QPainterPath cardBorderPath(const QRectF& rRect, E_CARD_BORDER_SHAPE eShape, qre
 } // namespace
 
 void ComponentPainter::paint(QPainter* pPainter, const Component& rComponent,
-                             const QRectF& rContentRect, QImage* pImageCache)
+                             const QRectF& rContentRect, QImage* pImageCache,
+                             const QString& strProjectDirectory)
 {
     if (rComponent.eType == E_COMPONENT_TYPE_IMAGE) {
         QImage image;
@@ -214,10 +218,37 @@ void ComponentPainter::paint(QPainter* pPainter, const Component& rComponent,
             const E_CARD_BORDER_SHAPE eShape = rSticker.eBorderShape;
             const QRectF outerRect = cardBorderOuterRect(rect, eShape);
             constexpr qreal dGap = 6;   // 内外框间距（与原实现一致）
+            constexpr qreal dOuterCornerRadius = 8;
 
+            // ① 边框内的图片：按边框形状裁剪，**框内显示、框外隐藏**。
+            //    图片按「等比覆盖」铺满外框，取景位置由 StickerData 的偏移决定；
+            //    图片缺失（未设置或文件已删）时跳过，只剩边框线。
+            if (!rSticker.strImagePath.isEmpty()) {
+                QImage image;
+                if (pImageCache) {
+                    if (pImageCache->isNull()) {
+                        pImageCache->load(AssetStore::resolvePath(rSticker.strImagePath,
+                                                                  strProjectDirectory));
+                    }
+                    image = *pImageCache;
+                } else {
+                    image.load(AssetStore::resolvePath(rSticker.strImagePath,
+                                                       strProjectDirectory));
+                }
+                if (!image.isNull()) {
+                    pPainter->save();
+                    pPainter->setClipPath(cardBorderPath(outerRect, eShape, dOuterCornerRadius));
+                    pPainter->setRenderHint(QPainter::SmoothPixmapTransform);
+                    ImageFit::paintCover(pPainter, image, outerRect,
+                                         rSticker.dImageOffsetX, rSticker.dImageOffsetY);
+                    pPainter->restore();
+                }
+            }
+
+            // ② 边框线：绘制在图片之上，保证线条不被图片盖住
             pPainter->setBrush(Qt::NoBrush);
             pPainter->setPen(QPen(color, 3));
-            pPainter->drawPath(cardBorderPath(outerRect, eShape, 8));
+            pPainter->drawPath(cardBorderPath(outerRect, eShape, dOuterCornerRadius));
 
             // 内框：与外框保持 dGap 间距；尺寸过小时不再绘制，避免两圈线重叠成一团
             const QRectF innerRect = outerRect.adjusted(dGap, dGap, -dGap, -dGap);

@@ -163,6 +163,15 @@ void AssetPanel::onAssetContextMenu(const QPoint& rPos)
                             bInUse = true;
                             break;
                         }
+                        // 卡片边框内的图片（同样存项目内相对路径，需先解析）
+                        if(rComponent.eType == E_COMPONENT_TYPE_STICKER
+                           && !rComponent.stickerData.strImagePath.isEmpty()
+                           && isSameFile(AssetStore::resolvePath(rComponent.stickerData.strImagePath,
+                                                                 strProjectDir),
+                                         strPath)) {
+                            bInUse = true;
+                            break;
+                        }
                     }
                     if(bInUse) {
                         break;

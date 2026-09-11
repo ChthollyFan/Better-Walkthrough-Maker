@@ -54,7 +54,9 @@ void paintPageBackground(QPainter* pPainter, const Page& rPage, qreal dOffsetY,
 }
 
 // 在指定原点绘制一页的全部组件（y 偏移用于长图拼接）
-void paintPageComponents(QPainter* pPainter, const Page& rPage, qreal dOffsetY)
+// strProjectDirectory 用于解析组件内图片的相对路径（卡片边框图片）
+void paintPageComponents(QPainter* pPainter, const Page& rPage, qreal dOffsetY,
+                         const QString& strProjectDirectory)
 {
     const QVector<Component> sorted = sortedComponents(rPage.vecComponents);
     for (const Component& rComponent : sorted) {
@@ -65,7 +67,8 @@ void paintPageComponents(QPainter* pPainter, const Page& rPage, qreal dOffsetY)
         pPainter->translate(rComponent.pos.x(), dOffsetY + rComponent.pos.y());
         pPainter->rotate(rComponent.dRotation);
         ComponentPainter::paint(pPainter, rComponent,
-                                QRectF(QPointF(0, 0), rComponent.size));
+                                QRectF(QPointF(0, 0), rComponent.size), nullptr,
+                                strProjectDirectory);
         pPainter->restore();
     }
 }
@@ -104,7 +107,7 @@ QImage ExportRenderer::renderPage(const Page& rPage, qreal dScale, const QColor&
     painter.scale(dScale, dScale);
     // 先铺页面背景图，再画组件（与画布层序一致：背景图在最底）
     paintPageBackground(&painter, rPage, 0, rProjectDirectory);
-    paintPageComponents(&painter, rPage, 0);
+    paintPageComponents(&painter, rPage, 0, rProjectDirectory);
     painter.end();
 
     drawAuthorMark(image, rAuthor, dScale);
@@ -153,7 +156,7 @@ QImage ExportRenderer::renderLongImage(const QVector<Page>& rPages, qreal dScale
         // 页面背景（宽度不足最大宽时补背景色）
         painter.fillRect(QRectF(0, dOffsetY, nWidth, rPage.size.height()), rBackground);
         paintPageBackground(&painter, rPage, dOffsetY, rProjectDirectory);
-        paintPageComponents(&painter, rPage, dOffsetY);
+        paintPageComponents(&painter, rPage, dOffsetY, rProjectDirectory);
         dOffsetY += rPage.size.height();
         if (bSeparator && nIndex < rPages.size() - 1) {
             painter.fillRect(QRectF(0, dOffsetY, nWidth, nSeparatorHeight), QColor(200, 200, 200));
