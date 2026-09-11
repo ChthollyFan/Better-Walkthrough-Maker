@@ -139,7 +139,7 @@ pwsh -File package_single.ps1   # 生成 BWM.exe（单文件，免安装、无�
 ### 零、发布注意事项（实测踩坑，发布前必读）
 
 1. **版本号只有一个来源**：只改顶层 `CMakeLists.txt` 的 `project(VERSION)`，主程序经 `BWM_VERSION`
-   宏读取（`main.cpp`、`deploy.ps1` 中的同值仅作脱离 CMake 时的回退），不要在新地方再写死版本号。
+   宏读取（`main.cpp` 中的同值仅作脱离 CMake 时的回退），不要在新地方再写死版本号。
    **tag 名必须与之一致**：`VERSION 0.4.0` ↔ `git tag v0.4.0`。
 2. **不要复用已发布过的版本号**：若 dev 分支内容已领先上一个 tag，必须递增版本号。
    同号会导致「关于」对话框显示的版本与 Release 页面对不上，用户报障时无法定位具体构建。
