@@ -7,7 +7,7 @@
 - 技术栈：Qt 6（Widgets + PrintSupport）+ C++20 + CMake
 - 平台：Windows 桌面优先
 - 发布产物：单个免安装的 `BWM.exe`（无需 Qt DLL）
-- 当前版本：`0.3.0`（M1–M7 全部完成，详见 [CHANGELOG](../CHANGELOG.md)）
+- 当前版本：`0.4.0`（M1–M7 全部完成，详见 [CHANGELOG](../CHANGELOG.md)）
 
 > 本 Wiki 有两个读者：**只想用工具的作者**（从「使用者文档」开始）与
 > **要构建、扩展、发布本项目的开发者**（从「开发者文档」开始）。

@@ -23,7 +23,7 @@ int main(int argc, char* argv[])
 #ifdef BWM_VERSION
     QCoreApplication::setApplicationVersion(QStringLiteral(BWM_VERSION));
 #else
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.3.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.4.0"));
 #endif
 
     // 应用图标（窗口标题栏、任务栏、Alt+Tab）；exe 文件图标由 app.rc 嵌入

@@ -1,5 +1,5 @@
 # 自动发布：推送 v* 标签时构建并发布单文件 BWM.exe 到 GitHub Releases
-# 用法：git tag v0.3.0 && git push origin v0.3.0
+# 用法：git tag v0.4.0 && git push origin v0.4.0
 # 说明：此工作流在 Windows 官方 runner 上安装 MinGW 与 Qt（MinGW 版），
 #       与本地构建环境保持一致，避免 MSVC 差异。
 #       发布产物为单文件 BWM.exe（Enigma Virtual Box 打包，无需 Qt DLL），

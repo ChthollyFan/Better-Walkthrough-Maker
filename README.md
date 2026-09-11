@@ -33,7 +33,7 @@
 - **下载使用**：从 [Releases](https://github.com/ChthollyFan/Better-Walkthrough-Maker/releases) 下载 `BWM.exe`，双击即可运行
 - **本地打包（单文件，发布用）**：先 `pwsh -File package.ps1` 生成 `release/` 目录，再 `pwsh -File package_single.ps1` 打包出根目录下的 `BWM.exe`（打包工具 `tools/enigmavbconsole.exe` 已随仓库提供）
 - **本地打包（文件夹版）**：`pwsh -File package.ps1`（生成 `release/` 目录 + zip 压缩包）
-- **自动发布**：打标签 `git tag v0.3.0 && git push origin v0.3.0`，GitHub Actions 自动构建（装 Qt → 编译 → 测试 → 打包）并发布 `BWM.exe` 到 Releases
+- **自动发布**：打标签 `git tag v0.4.0 && git push origin v0.4.0`，GitHub Actions 自动构建（装 Qt → 编译 → 测试 → 打包）并发布 `BWM.exe` 到 Releases
 
 ## 设计文档
 
